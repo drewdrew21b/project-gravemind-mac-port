@@ -260,9 +260,8 @@ func renderStates(to dir: URL) {
         }),
         ("16-sound-headset", {
             $0.update = .done("Up to date"); $0.steam = .done("Signed in as player123")
-            $0.sound = .warning("AirPods Pro is connected, but your Mac's sound goes to MacBook Pro Speakers. To hear the "
-                                + "game in AirPods Pro, pick it in the Sound menu before you press Play: the game keeps "
-                                + "the sound output it starts with.")
+            $0.sound = .done("MacBook Pro Speakers. To hear the game in AirPods Pro instead, pick it in the Sound menu "
+                             + "before you press Play: the game keeps the sound output it starts with.")
         }),
         ("8-bad-link", {
             $0.update = .done("Up to date"); $0.steam = .done("Signed in as player123")

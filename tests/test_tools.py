@@ -142,6 +142,11 @@ class ToolsTest(unittest.TestCase):
              "coreaudio_device_transport": "coreaudio_device_type_bluetooth"}]}]})
         with mock.patch.object(t.subprocess, "run", return_value=mock.Mock(stdout=profile)):
             self.assertEqual(t.output_devices(), [self.SPEAKERS, self.AIRPODS])
+        renamed = json.dumps({"SPAudioDataType": [{"_items": [
+            {"_name": "Studio\tMonitors\n", "coreaudio_default_audio_output_device": "spaudio_yes",
+             "coreaudio_device_output": 2, "coreaudio_device_transport": "coreaudio_device_type_usb"}]}]})
+        with mock.patch.object(t.subprocess, "run", return_value=mock.Mock(stdout=renamed)):
+            self.assertEqual(t.output_devices(), [("Studio Monitors", True, "coreaudio_device_type_usb")])  # (one field)
         with mock.patch.object(t.subprocess, "run", return_value=mock.Mock(stdout="not json")):
             self.assertEqual(t.output_devices(), [])
         with mock.patch.object(t.subprocess, "run", side_effect=OSError):

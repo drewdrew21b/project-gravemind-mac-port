@@ -161,7 +161,7 @@ def output_devices():
         items = [d for group in json.loads(out).get("SPAudioDataType", []) for d in group.get("_items", [])]
     except (OSError, ValueError, subprocess.SubprocessError):
         return []
-    return [(d.get("_name", ""), d.get("coreaudio_default_audio_output_device") == "spaudio_yes",
+    return [(" ".join(str(d.get("_name", "")).split()), d.get("coreaudio_default_audio_output_device") == "spaudio_yes",
              d.get("coreaudio_device_transport", ""))
             for d in items if d.get("coreaudio_device_output")]
 

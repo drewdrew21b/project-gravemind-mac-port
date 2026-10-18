@@ -169,11 +169,11 @@ final class Launcher: ObservableObject {
                 sound = .warning("Your Mac's sound goes to \(output), which is muted, so the game will be silent. "
                                  + "Un-mute it (or pick your headphones) in the Sound menu \(before)")
             case .virtual(let output):
-                sound = .warning("Your Mac's sound goes to \(output), which has no speaker behind it, so you won't hear "
-                                 + "the game. Pick your speakers or headphones in the Sound menu \(before)")
-            case .headset(let headset, let output):
-                sound = .warning("\(headset) is connected, but your Mac's sound goes to \(output). To hear the game in "
-                                 + "\(headset), pick it in the Sound menu \(before)")
+                sound = .warning("Your Mac's sound goes to \(output), a virtual device (e.g. a meeting or recording app's). "
+                                 + "If it doesn't pass sound on to speakers or headphones, you won't hear the game: pick "
+                                 + "your speakers or headphones in the Sound menu \(before)")
+            case .headset(let headset, let output):  // (a note, not a warning: often on purpose)
+                sound = .done("\(output). To hear the game in \(headset) instead, pick it in the Sound menu \(before)")
             case .other: break
             }
         }, onExit: { [self] _ in checkingSound = false })
