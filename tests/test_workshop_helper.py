@@ -252,6 +252,41 @@ class HelperTest(unittest.TestCase):
         final = seen[-1]
         self.assertEqual((final["title"], final["percent"], final["bytes_total"]), ("Warlock", 100.0, 1600000000))
 
+    def search(self, h, title, found):
+        """id_from_search(title) when the Workshop search page lists `found` ({id: title})."""
+        page = " ".join(f'<a href="https://steamcommunity.com/sharedfiles/filedetails/?id={i}">' for i in found)
+        response = mock.MagicMock()
+        response.__enter__.return_value.read.return_value = page.encode()
+        details = [{"publishedfileid": i, "title": t} for i, t in found.items()]
+        with mock.patch.object(h.urllib.request, "urlopen", return_value=response), \
+                mock.patch.object(h, "workshop_details", return_value=details):
+            return h.id_from_search(title)
+
+    def test_search_never_settles_for_a_different_mod(self):
+        # "Halo 2 Spartan (characters)" (a character pack a server made) once fetched the 3 GB campaign mod
+        # "Halo 2 But Everyone is a Spartan": close enough for a loose similarity score, but the wrong mod
+        h = self.load()
+        self.assertIsNone(self.search(h, "Halo 2 Spartan", {"3010133477": "Halo 2 But Everyone is a Spartan"}))
+        self.assertEqual(self.search(h, "Halo 3 Foundation", {"1": "Halo 3 Foundations", "2": "Halo 3 Foundation"}),
+                         "2")
+        self.assertEqual(self.search(h, "Warlock - Beta", {"7": "Warlock"}), "7")  # (a server's suffix)
+        self.assertEqual(self.search(h, "Ultimate Forge 2.0", {"9": "ULTIMATE FORGE 2.0"}), "9")
+
+    def test_character_packs_are_left_to_the_server(self):
+        # since 0.9.18 servers share packs of their character mods, named "<mod> (characters)"; they aren't
+        # Workshop items, so the helper doesn't search Steam for them (the game gets them from the server)
+        log = self.home / "logs" / "client.log"  # (the helper's log when RECLAIMER_LOG isn't set)
+        log.write_text("Mod Halo 2 Spartan (characters) not downloaded: Start Steam and sign in with an account "
+                       "that owns MCC to use Workshop\n"
+                       "Workshop for CE Spartan (characters) unavailable: no Steam; using the server\n"
+                       "Mod Warlock not downloaded: Start Steam and sign in with an account that owns MCC to use "
+                       "Workshop\n")
+        h = self.load()
+        with mock.patch.object(h, "GAME_GRACE", 0.1), mock.patch.object(h, "fetch") as fetch, \
+                mock.patch.object(h, "game_running", return_value=False):
+            h.watch()
+        self.assertEqual([c.args[0] for c in fetch.call_args_list], ["Warlock"])  # (an ordinary mod still is)
+
     def test_no_account_dialog_or_terminal_left_in_the_helper(self):
         source = HELPER.read_text()
         self.assertNotIn("display dialog", source)

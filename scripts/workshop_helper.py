@@ -33,7 +33,6 @@ import threading
 import time
 import urllib.parse
 import urllib.request
-from difflib import SequenceMatcher
 from pathlib import Path
 
 HOME = Path.home()
@@ -52,6 +51,8 @@ GAME_GRACE = 60  # seconds the game must be gone before the watching helper stop
 APP_ID = "976730"
 FAILED = re.compile(r"^Mod (.+?) not downloaded: .*Workshop")
 FALLBACK = re.compile(r"^Workshop for (.+?) unavailable: .*using the server")
+# a pack a server made of one of its character mods (0.9.18+): not a Workshop item, the server shares it
+CHARACTER_PACK = re.compile(r" \(characters\)$")
 PROGRESS = re.compile(r"^\s*(\d+(?:\.\d+)?)% ")
 # joins: the address being joined, and why a join failed (the window offers to switch versions and rejoin)
 JOINING = re.compile(r"^Joining ([A-Za-z0-9.-]+:\d+)\b")
@@ -297,8 +298,13 @@ def id_from_modinfo(title):
     return None
 
 
+def same_title(a, b):
+    return re.sub(r"[^a-z0-9]+", " ", a.lower()).strip() == re.sub(r"[^a-z0-9]+", " ", b.lower()).strip()
+
+
 def id_from_search(title):
-    """Best Workshop title match for MCC; tolerates suffixes like ' - Beta'."""
+    """The MCC Workshop item with this title (case and punctuation aside); tolerates suffixes like ' - Beta'. Never a
+    merely similar title: "Halo 2 Spartan" once fetched the unrelated "Halo 2 But Everyone is a Spartan"."""
     base = re.sub(r"\s*[-(\[].*$", "", title).strip() or title
     url = ("https://steamcommunity.com/workshop/browse/?appid=" + APP_ID
            + "&searchtext=" + urllib.parse.quote(base) + "&browsesort=textsearch")
@@ -306,14 +312,12 @@ def id_from_search(title):
         ids = sorted(set(re.findall(r"filedetails/\?id=(\d+)", r.read().decode("utf-8", "replace"))))
     if not ids:
         return None
-    best, score = None, 0.0
-    for f in workshop_details(ids[:20]):
-        t = (f.get("title") or "").strip()
-        s = max(SequenceMatcher(None, t.lower(), title.lower()).ratio(),
-                SequenceMatcher(None, t.lower(), base.lower()).ratio())
-        if s > score:
-            best, score = f["publishedfileid"], s
-    return best if score >= 0.6 else None
+    details = workshop_details(ids[:20])
+    for wanted in (title, base):  # the full title first: "Foo - Remastered" over "Foo"
+        for f in details:
+            if same_title(f.get("title") or "", wanted):
+                return f["publishedfileid"]
+    return None
 
 
 def resolve(item):
@@ -557,6 +561,12 @@ def watch():
             if m or JOIN_NO_ANSWER.search(line):
                 record_join_problem(joining, m.group(1) if m else None, m.group(2) if m else None,
                                     "version" if m else "no-answer")
+                continue
+            m = FAILED.match(line) or FALLBACK.match(line)
+            if m and CHARACTER_PACK.search(m.group(1)):
+                if m.group(1) not in seen:
+                    seen.add(m.group(1))
+                    log(f"{m.group(1)} is a character pack the server shares; nothing to get from Steam")
                 continue
             m = FAILED.match(line)
             if m and m.group(1) not in seen:
