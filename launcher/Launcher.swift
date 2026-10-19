@@ -41,6 +41,7 @@ final class Launcher: ObservableObject {
     /// Halo 3 was removed in Tools: Play turns into Install Halo 3, which opens the game checklist.
     @Published var halo3Missing = !FileManager.default.fileExists(atPath: mccFolder.appendingPathComponent("halo3/halo3.dll").path)
     @Published var showInstallGames = false
+    @Published var showController = false
     /// An older Project Reclaimer the player chose for servers that haven't updated (nil: the newest).
     @Published var chosenVersion: String? { didSet { if chosenVersion != oldValue { log("chosen version: \(chosenVersion ?? "newest")") } } }
     let tools = ToolsModel()

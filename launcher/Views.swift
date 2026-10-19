@@ -296,8 +296,9 @@ struct ContentView: View {
             .sheet(isPresented: $m.showInstallGames) { InstallGamesSheet(m: m, t: m.tools) }
         }
         .padding(24)
-        .frame(width: 480)
+        .frame(width: 540)
         .sheet(isPresented: $m.showTools) { ToolsSheet(launcher: m, t: m.tools) }
+        .sheet(isPresented: $m.showController) { ControllerSheet(launcher: m) }
     }
 
     /// Halo 3 was removed in Tools: the Play button installs it instead.
@@ -313,10 +314,18 @@ struct ContentView: View {
 
     private var header: some View {
         AppHeader(subtitle: m.playing ? "Have fun! This window shows mod downloads while you play." : "Halo 3 on your Mac") {
+            Button { m.showController = true } label: {
+                Label("Controller", systemImage: "gamecontroller").labelStyle(.titleAndIcon)
+            }
+            .controlSize(.large)
+            .fixedSize()
+            .help("Test and map game controller, check inputs and vibration")
+
             Button { m.showTools = true } label: {
                 Label("Tools", systemImage: "gearshape").labelStyle(.titleAndIcon)
             }
             .controlSize(.large)
+            .fixedSize()
             .help("Force quit, repair, mods and disk space, reports, uninstall")
         }
     }
@@ -372,10 +381,10 @@ struct AppHeader<Trailing: View>: View {
             Image(nsImage: NSApp?.applicationIconImage ?? NSImage(named: NSImage.applicationIconName) ?? NSImage())
                 .resizable().frame(width: 56, height: 56).clipShape(RoundedRectangle(cornerRadius: 12))
             VStack(alignment: .leading, spacing: 2) {
-                Text("Project Reclaimer").font(.title.bold())
+                Text("Project Reclaimer").font(.title.bold()).fixedSize()
                 Text(subtitle).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
-            Spacer(minLength: 0)
+            Spacer(minLength: 12)
             trailing
         }
     }
