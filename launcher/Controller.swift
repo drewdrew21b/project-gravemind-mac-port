@@ -84,7 +84,7 @@ final class ControllerManager: ObservableObject {
             [kIOHIDDeviceUsagePageKey as String: kHIDPage_GenericDesktop, kIOHIDDeviceUsageKey as String: kHIDUsage_GD_Joystick],
             [kIOHIDDeviceUsagePageKey as String: kHIDPage_GenericDesktop, kIOHIDDeviceUsageKey as String: kHIDUsage_GD_GamePad],
             [kIOHIDDeviceUsagePageKey as String: kHIDPage_GenericDesktop, kIOHIDDeviceUsageKey as String: kHIDUsage_GD_MultiAxisController],
-            [kIOHIDDeviceUsagePageKey as String: 0xFF01]
+            [kIOHIDDeviceUsagePageKey as String: 0xFF01, kIOHIDVendorIDKey as String: 0x057E]  // Switch Pro
         ]
         IOHIDManagerSetDeviceMatchingMultiple(mgr, matching as CFArray)
 
@@ -116,9 +116,14 @@ final class ControllerManager: ObservableObject {
         scanDevices()
     }
 
+    /// The callbacks hold an unretained pointer to self: unregister them before self can go away.
     func stop() {
         if let mgr = hidManager {
-            IOHIDManagerClose(mgr, IOOptionBits(kIOHIDOptionsTypeNone))
+            IOHIDManagerRegisterDeviceMatchingCallback(mgr, nil, nil)
+            IOHIDManagerRegisterDeviceRemovalCallback(mgr, nil, nil)
+            IOHIDManagerRegisterInputValueCallback(mgr, nil, nil)
+            IOHIDManagerUnscheduleFromRunLoop(mgr, CFRunLoopGetMain(), CFRunLoopMode.defaultMode.rawValue)
+            IOHIDManagerClose(mgr, IOOptionBits(kIOHIDOptionsTypeNone))  // (closes the devices it opened)
             hidManager = nil
         }
         devices.removeAll()
@@ -167,7 +172,6 @@ final class ControllerManager: ObservableObject {
                 is8B = false
             }
 
-            IOHIDDeviceOpen(dev, IOOptionBits(kIOHIDOptionsTypeNone))
             let id = "\(vid)-\(pid)-\(idx)"
             found.append(ControllerDevice(id: id, device: dev, name: name,
                                           vendorId: vid, productId: pid,
@@ -679,6 +683,7 @@ struct ControllerSheet: View {
         }
         .padding(18)
         .frame(width: 500)
+        .onDisappear { c.stop() }
     }
 
     private func bindingFor(_ playerIdx: Int) -> Binding<Int> {
