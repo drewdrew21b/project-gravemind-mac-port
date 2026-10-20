@@ -148,7 +148,8 @@ final class ControllerManager: ObservableObject {
             let usage = (IOHIDDeviceGetProperty(dev, "PrimaryUsage" as CFString) as? Int) ?? 0
             let rawName = (IOHIDDeviceGetProperty(dev, "Product" as CFString) as? String) ?? "Game Controller"
 
-            guard vid > 0 && pid > 0, vid != 0x05AC, (usage == 5 || usage == 4 || vid == 0x2DC8 || vid == 0x057E) else {
+            let virtualCopy = (IOHIDDeviceGetProperty(dev, "HIDVirtualDevice" as CFString) as? Bool) ?? false
+            guard !virtualCopy, vid > 0 && pid > 0, vid != 0x05AC, (usage == 5 || usage == 4 || vid == 0x2DC8 || vid == 0x057E) else {
                 continue
             }
 
@@ -220,6 +221,9 @@ final class ControllerManager: ObservableObject {
                 "back": "b10", "start": "b11", "guide": "b12",
                 "leftstick": "b13", "rightstick": "b14"
             ]
+        } else if let layout = knownLayout(vendor: current.vendorId) {
+            hasActiveMapping = true  // (the game's SDL maps these itself)
+            activeMapping = layout
         } else {
             // Raw generic HID fallback in Wine (what Wine sees when NO mapping exists)
             activeMapping = [
@@ -268,6 +272,7 @@ final class ControllerManager: ObservableObject {
         let page = IOHIDElementGetUsagePage(elem)
         let usage = IOHIDElementGetUsage(elem)
         let intVal = IOHIDValueGetIntegerValue(value)
+        let lo = IOHIDElementGetLogicalMin(elem), hi = IOHIDElementGetLogicalMax(elem)  // (each control's own range)
 
         Task { @MainActor in
             // Handle Nintendo Switch Pro Controller Vendor-Defined Report (page 65281 / 0xFF01)
@@ -330,28 +335,22 @@ final class ControllerManager: ObservableObject {
                 }
             } else if page == 1 { // Generic Desktop (Sticks / D-Pad)
                 if usage == 0x39 { // Hat switch (D-Pad)
-                    if intVal >= 0 && intVal <= 7 {
-                        dpadState.up = (intVal == 7 || intVal == 0 || intVal == 1)
-                        dpadState.right = (intVal == 1 || intVal == 2 || intVal == 3)
-                        dpadState.down = (intVal == 3 || intVal == 4 || intVal == 5)
-                        dpadState.left = (intVal == 5 || intVal == 6 || intVal == 7)
-                    } else {
-                        dpadState = (false, false, false, false)
-                    }
+                    let hat = hatDirections(intVal, min: lo, max: hi)
+                    dpadState = (hat.up, hat.down, hat.left, hat.right)
                 } else if usage == 0x30 { // X axis
-                    leftStick.x = Double(intVal - 128) / 128.0
+                    leftStick.x = stickPosition(intVal, min: lo, max: hi)
                 } else if usage == 0x31 { // Y axis
-                    leftStick.y = Double(intVal - 128) / 128.0
+                    leftStick.y = stickPosition(intVal, min: lo, max: hi)
                 } else if usage == 0x32 { // Z axis / Right Stick X
-                    rightStick.x = Double(intVal - 128) / 128.0
+                    rightStick.x = stickPosition(intVal, min: lo, max: hi)
                 } else if usage == 0x35 { // Rz axis / Right Stick Y
-                    rightStick.y = Double(intVal - 128) / 128.0
+                    rightStick.y = stickPosition(intVal, min: lo, max: hi)
                 }
             } else if page == 2 { // Simulation controls (Triggers)
                 if usage == 0xC5 { // Left Trigger (Brake)
-                    leftTrigger = Double(intVal) / 255.0
+                    leftTrigger = axisFraction(intVal, min: lo, max: hi)
                 } else if usage == 0xC4 { // Right Trigger (Accelerator)
-                    rightTrigger = Double(intVal) / 255.0
+                    rightTrigger = axisFraction(intVal, min: lo, max: hi)
                 }
             }
         }

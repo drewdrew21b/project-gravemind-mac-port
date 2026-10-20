@@ -204,5 +204,26 @@ check(!newer.isOver(windows: [WineWindow(number: 9, width: 1920, height: 1080, o
 let noWine = fm.temporaryDirectory.appendingPathComponent("no-wine-\(getpid())")
 check(wineWindows(wineDir: noWine) == [], "nothing runs from a missing folder: no windows")
 
+// controller axes, scaled by the range each control reports (8BitDo: 8-bit sticks; Xbox: 16-bit sticks, 10-bit triggers)
+check(axisFraction(0, min: 0, max: 1023) == 0 && axisFraction(1023, min: 0, max: 1023) == 1, "10-bit trigger ends")
+check(abs(axisFraction(512, min: 0, max: 1023) - 0.5) < 0.001, "10-bit trigger half way")
+check(abs(stickPosition(32768, min: 0, max: 65535)) < 0.001, "16-bit stick centred")
+check(stickPosition(0, min: 0, max: 65535) == -1 && stickPosition(65535, min: 0, max: 65535) == 1, "16-bit stick ends")
+check(abs(stickPosition(128, min: 0, max: 255) - 0.0039) < 0.001, "8-bit stick centred")
+check(stickPosition(-32768, min: -32768, max: 32767) == -1, "signed stick")
+check(axisFraction(5, min: 0, max: 0) == 0 && axisFraction(900, min: 0, max: 255) == 1, "odd ranges stay in 0...1")
+
+// D-pad hats count from their own minimum: 8BitDo 0...7, Xbox 1...8 (both north first, clockwise; outside = released)
+check(hatDirections(1, min: 1, max: 8) == HatDirections(up: true), "Xbox hat 1 is up only")
+check(hatDirections(3, min: 1, max: 8) == HatDirections(right: true), "Xbox hat 3 is right")
+check(hatDirections(2, min: 1, max: 8) == HatDirections(up: true, right: true), "Xbox hat 2 is up-right")
+check(hatDirections(0, min: 1, max: 8) == HatDirections(), "Xbox hat released")
+check(hatDirections(0, min: 0, max: 7) == HatDirections(up: true) && hatDirections(8, min: 0, max: 7) == HatDirections(),
+      "8BitDo hat")
+// the controller window draws an Xbox controller's buttons where they are (not as an unmapped pad)
+check(knownLayout(vendor: 0x045E)?["x"] == "b3" && knownLayout(vendor: 0x045E)?["y"] == "b4"
+      && knownLayout(vendor: 0x045E)?["leftshoulder"] == "b6", "Xbox layout")
+check(knownLayout(vendor: 0x1234) == nil, "unknown pads keep the unmapped view")
+
 print(failures == 0 ? "All launcher tests passed" : "\(failures) launcher test(s) failed")
 exit(failures == 0 ? 0 : 1)

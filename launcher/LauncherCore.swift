@@ -368,3 +368,40 @@ func wineWindows(wineDir: URL) -> [WineWindow]? {
     }
     return windows
 }
+
+// MARK: - controller axes
+
+/// A control's value as 0...1 of the range it reports (logical min/max): 8BitDo sticks are 8-bit, an Xbox
+/// controller's sticks 16-bit and its triggers 10-bit.
+func axisFraction(_ value: Int, min: Int, max: Int) -> Double {
+    guard max > min else { return 0 }
+    return Swift.min(1, Swift.max(0, Double(value - min) / Double(max - min)))
+}
+
+/// A stick axis as -1...1.
+func stickPosition(_ value: Int, min: Int, max: Int) -> Double { axisFraction(value, min: min, max: max) * 2 - 1 }
+
+/// Which way a D-pad hat points. Hats count clockwise from north starting at their own minimum (8BitDo 0...7,
+/// Xbox 1...8); a value outside the eight directions means released.
+struct HatDirections: Equatable {
+    var up = false, right = false, down = false, left = false
+}
+
+func hatDirections(_ value: Int, min: Int, max: Int) -> HatDirections {
+    let h = value - min
+    guard (0...7).contains(h) else { return HatDirections() }
+    return HatDirections(up: [7, 0, 1].contains(h), right: [1, 2, 3].contains(h), down: [3, 4, 5].contains(h),
+                         left: [5, 6, 7].contains(h))
+}
+
+/// Button layouts of controllers the game's SDL already knows, as SDL buttons (HID button usage - 1), so the
+/// controller window draws them as the game uses them. Xbox controllers over Bluetooth: A 1, B 2, X 4, Y 5, LB 7,
+/// RB 8, View 11, Menu 12, Xbox 13, stick clicks 14/15 (recorded from an Xbox Wireless Controller, firmware 5.x).
+func knownLayout(vendor: Int) -> [String: String]? {
+    switch vendor {
+    case 0x045E:  // Microsoft
+        return ["a": "b0", "b": "b1", "x": "b3", "y": "b4", "leftshoulder": "b6", "rightshoulder": "b7",
+                "back": "b10", "start": "b11", "guide": "b12", "leftstick": "b13", "rightstick": "b14"]
+    default: return nil
+    }
+}
