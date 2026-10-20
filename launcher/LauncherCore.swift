@@ -402,6 +402,22 @@ func knownLayout(vendor: Int) -> [String: String]? {
     case 0x045E:  // Microsoft
         return ["a": "b0", "b": "b1", "x": "b3", "y": "b4", "leftshoulder": "b6", "rightshoulder": "b7",
                 "back": "b10", "start": "b11", "guide": "b12", "leftstick": "b13", "rightstick": "b14"]
+    case 0x054C:  // Sony: read through Apple's GameController framework, numbered as GCButton
+        return ["a": "b\(GCButton.a.rawValue)", "b": "b\(GCButton.b.rawValue)", "x": "b\(GCButton.x.rawValue)",
+                "y": "b\(GCButton.y.rawValue)", "leftshoulder": "b\(GCButton.leftShoulder.rawValue)",
+                "rightshoulder": "b\(GCButton.rightShoulder.rawValue)", "back": "b\(GCButton.back.rawValue)",
+                "start": "b\(GCButton.start.rawValue)", "guide": "b\(GCButton.guide.rawValue)",
+                "leftstick": "b\(GCButton.leftStick.rawValue)", "rightstick": "b\(GCButton.rightStick.rawValue)"]
     default: return nil
     }
 }
+
+/// Buttons as the controller window numbers those it reads through Apple's GameController framework.
+enum GCButton: Int, CaseIterable {
+    case a, b, x, y, leftShoulder, rightShoulder, back, start, guide, leftStick, rightStick
+}
+
+/// Controllers the window reads through Apple's GameController framework rather than raw HID values. macOS's
+/// controller service switches a PlayStation pad (DualSense, DualShock 4) to its full report, which isn't
+/// described in HID values, so the raw view showed no input at all (seen with a DualSense on 1.4.1).
+func readsThroughGameController(vendor: Int) -> Bool { vendor == 0x054C }

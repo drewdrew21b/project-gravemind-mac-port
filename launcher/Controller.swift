@@ -3,6 +3,7 @@
 import AppKit
 import SwiftUI
 import IOKit.hid
+import GameController
 
 struct ControllerDevice: Identifiable, Equatable {
     let id: String
@@ -70,6 +71,8 @@ final class ControllerManager: ObservableObject {
     }
 
     private var hidManager: IOHIDManager?
+    private var gcObservers: [NSObjectProtocol] = []
+    private var gcPad: GCController?  // the selected pad, when it's read through the GameController framework
 
     init() {
         start()
@@ -113,11 +116,20 @@ final class ControllerManager: ObservableObject {
         IOHIDManagerRegisterInputValueCallback(mgr, valueCallback, context)
         IOHIDManagerScheduleWithRunLoop(mgr, CFRunLoopGetMain(), CFRunLoopMode.defaultMode.rawValue)
         IOHIDManagerOpen(mgr, IOOptionBits(kIOHIDOptionsTypeNone))
+        for name in [NSNotification.Name.GCControllerDidConnect, .GCControllerDidDisconnect] {
+            gcObservers.append(NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.attachGameController() }
+            })
+        }
         scanDevices()
     }
 
     /// The callbacks hold an unretained pointer to self: unregister them before self can go away.
     func stop() {
+        gcObservers.forEach(NotificationCenter.default.removeObserver)
+        gcObservers = []
+        gcPad?.extendedGamepad?.valueChangedHandler = nil
+        gcPad = nil
         if let mgr = hidManager {
             IOHIDManagerRegisterDeviceMatchingCallback(mgr, nil, nil)
             IOHIDManagerRegisterDeviceRemovalCallback(mgr, nil, nil)
@@ -200,7 +212,41 @@ final class ControllerManager: ObservableObject {
         rightTrigger = 0.0
     }
 
+    /// PlayStation pads (see readsThroughGameController): show the selected one's input from the GameController
+    /// framework. Pads of one kind are paired with macOS's list of them in order.
+    private func attachGameController() {
+        gcPad?.extendedGamepad?.valueChangedHandler = nil
+        gcPad = nil
+        guard let current = currentDevice, readsThroughGameController(vendor: current.vendorId) else { return }
+        let same = devices.filter { $0.vendorId == current.vendorId }
+        let pads = GCController.controllers().filter { pad in
+            pad.extendedGamepad != nil
+                && ["DualSense", "DualShock"].contains { (pad.productCategory + " " + (pad.vendorName ?? "")).contains($0) }
+        }
+        guard let n = same.firstIndex(of: current), pads.indices.contains(n) else { return }
+        gcPad = pads[n]
+        gcPad?.extendedGamepad?.valueChangedHandler = { [weak self] pad, _ in
+            MainActor.assumeIsolated { self?.show(pad) }
+        }
+    }
+
+    private func show(_ pad: GCExtendedGamepad) {
+        let buttons: [(GCButton, GCControllerButtonInput?)] = [
+            (.a, pad.buttonA), (.b, pad.buttonB), (.x, pad.buttonX), (.y, pad.buttonY),
+            (.leftShoulder, pad.leftShoulder), (.rightShoulder, pad.rightShoulder), (.back, pad.buttonOptions),
+            (.start, pad.buttonMenu), (.guide, pad.buttonHome), (.leftStick, pad.leftThumbstickButton),
+            (.rightStick, pad.rightThumbstickButton)]
+        pressedButtons = Set(buttons.compactMap { $0.1?.isPressed == true ? $0.0.rawValue : nil })
+        dpadState = (pad.dpad.up.isPressed, pad.dpad.down.isPressed, pad.dpad.left.isPressed, pad.dpad.right.isPressed)
+        // (the framework's y points up; the window's, like HID's, down)
+        leftStick = CGPoint(x: Double(pad.leftThumbstick.xAxis.value), y: -Double(pad.leftThumbstick.yAxis.value))
+        rightStick = CGPoint(x: Double(pad.rightThumbstick.xAxis.value), y: -Double(pad.rightThumbstick.yAxis.value))
+        leftTrigger = Double(pad.leftTrigger.value)
+        rightTrigger = Double(pad.rightTrigger.value)
+    }
+
     private func loadActiveMapping() {
+        defer { attachGameController() }
         guard let current = currentDevice, !current.guid.isEmpty else {
             hasActiveMapping = false
             activeMapping = [:]
@@ -262,7 +308,7 @@ final class ControllerManager: ObservableObject {
     }
 
     private func handleInputValue(_ value: IOHIDValue) {
-        guard let current = currentDevice else { return }
+        guard let current = currentDevice, !readsThroughGameController(vendor: current.vendorId) else { return }
         let elem = IOHIDValueGetElement(value)
         let senderDev = IOHIDElementGetDevice(elem)
 

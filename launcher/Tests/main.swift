@@ -225,5 +225,11 @@ check(knownLayout(vendor: 0x045E)?["x"] == "b3" && knownLayout(vendor: 0x045E)?[
       && knownLayout(vendor: 0x045E)?["leftshoulder"] == "b6", "Xbox layout")
 check(knownLayout(vendor: 0x1234) == nil, "unknown pads keep the unmapped view")
 
+// PlayStation pads are read through Apple's GameController framework, in its standard button order
+check(readsThroughGameController(vendor: 0x054C) && !readsThroughGameController(vendor: 0x045E)
+      && !readsThroughGameController(vendor: 0x2DC8), "only PlayStation pads use the GameController framework")
+check(knownLayout(vendor: 0x054C)?["back"] == "b\(GCButton.back.rawValue)"
+      && knownLayout(vendor: 0x054C)?["y"] == "b\(GCButton.y.rawValue)", "PlayStation layout follows GCButton")
+
 print(failures == 0 ? "All launcher tests passed" : "\(failures) launcher test(s) failed")
 exit(failures == 0 ? 0 : 1)
