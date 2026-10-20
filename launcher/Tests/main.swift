@@ -165,5 +165,14 @@ try? "0.9.11\n".write(to: gd.appendingPathComponent("chosen-version"), atomicall
 check(installedVersion(gameDir: gd) == "0.9.11", "chosen version")
 try? fm.removeItem(at: gd)
 
+// Apple's developer tools: present, missing, or there but blocked by Xcode's license (GitHub #10)
+let licenseText = "You have not agreed to the Xcode license agreements. Please run 'sudo xcodebuild -license' from within a Terminal window to review and agree to the Xcode and Apple SDKs license."
+check(devTools(selected: false, pythonStatus: nil, pythonOutput: "") == .missing, "no developer tools")
+check(devTools(selected: true, pythonStatus: 0, pythonOutput: "") == .ok, "tools work")
+check(devTools(selected: true, pythonStatus: 69, pythonOutput: licenseText + "\n") == .license, "license not accepted")
+check(devTools(selected: true, pythonStatus: 1, pythonOutput: "xcrun: error: invalid active developer path") == .missing,
+      "broken tools: install them again")
+check(devTools(selected: true, pythonStatus: nil, pythonOutput: "") == .missing, "python couldn't start")
+
 print(failures == 0 ? "All launcher tests passed" : "\(failures) launcher test(s) failed")
 exit(failures == 0 ? 0 : 1)

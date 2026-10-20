@@ -288,3 +288,18 @@ func installedVersion(gameDir: URL) -> String? {
         return String(n.dropFirst(19).dropLast(4))
     }.max { versionParts($0).lexicographicallyPrecedes(versionParts($1)) }
 }
+
+// MARK: - Apple's developer tools
+
+/// Whether the helper scripts can run: /usr/bin/python3 belongs to Apple's developer tools. With Xcode installed but
+/// its license not yet accepted, that python refuses to start ("You have not agreed to the Xcode license
+/// agreements"), and every script fails: once an "internet connection" error that hid the cause (GitHub #10).
+enum DevTools: Equatable { case ok, missing, license }
+
+/// selected: `xcode-select -p` succeeded; pythonStatus: `/usr/bin/python3 -c pass`'s exit status (nil: it couldn't
+/// start); pythonOutput: what it printed.
+func devTools(selected: Bool, pythonStatus: Int32?, pythonOutput: String) -> DevTools {
+    guard selected, let status = pythonStatus else { return .missing }
+    if status == 0 { return .ok }
+    return pythonOutput.contains("xcodebuild -license") || pythonOutput.contains("Xcode license") ? .license : .missing
+}

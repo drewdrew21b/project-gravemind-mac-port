@@ -241,6 +241,17 @@ struct ContentView: View {
             .padding(16)
             .background(RoundedRectangle(cornerRadius: 14).fill(.background.secondary))
 
+            if m.needsLicense {
+                HStack {
+                    Button(m.acceptingLicense ? "Waiting for your password…" : "Accept Xcode's license") {
+                        m.acceptLicense()
+                    }
+                    .buttonStyle(.borderedProminent).tint(accent).disabled(m.acceptingLicense)
+                    if m.acceptingLicense { ProgressView().controlSize(.small) }
+                    Spacer()
+                }
+            }
+
             if let j = m.joinTrouble { JoinTroubleCard(m: m, j: j) }
 
             if m.playing {

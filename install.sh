@@ -33,7 +33,7 @@ MOLTENVK_PKG="MoltenVK-macos-1.4.2.tar|https://github.com/KhronosGroup/MoltenVK/
 MESA_PKG="mesa3d-26.2.4-release-msvc.7z|https://github.com/pal1000/mesa-dist-win/releases/download/26.2.4/mesa3d-26.2.4-release-msvc.7z|351fc8c8b695878ffb3eaa044b3ead08672a48b1a045e3c3e3975811df0f6695"
 DEPOT_PKG="DepotDownloader-macos-arm64.zip|https://github.com/SteamRE/DepotDownloader/releases/download/DepotDownloader_3.4.0/DepotDownloader-macos-arm64.zip|60e80c7c496f3f9a079cd3c62036b35d088c27bc0149baf38f009eb57a52f6a5"
 SPINFIX_SHA=0ec56a555b7b420c381f7cf5010719c86c3626c3c99efcb376981089f5d4f847  # spinfix/d3d11.dll (built from spinfix/spinfix.c)
-LAUNCHER_SHA=5f520995e3b1e13682986afa4cf33bd3cb3f50813b604a675580e590c0a5672f  # launcher/ProjectReclaimer (built by scripts/make_launcher.sh)
+LAUNCHER_SHA=2ce54e7a5b7d0607a3a2dc7ba1f2ad4964a319a57f80a8a8c3a17b6a49e1de11  # launcher/ProjectReclaimer (built by scripts/make_launcher.sh)
 UPDATE=${RECLAIMER_UPDATE:-}
 GUI=${RECLAIMER_GUI:-}
 # give up on a stalled connection instead of hanging (the launcher waits for this when updating)
@@ -97,6 +97,15 @@ note "Installs into: $BASE"
 [ "$(uname -m)" = arm64 ] || die "This needs an Apple Silicon Mac (M1 or newer)."
 MACOS_MAJOR=$(sw_vers -productVersion | cut -d. -f1)
 [ "$MACOS_MAJOR" -ge 14 ] || die "This needs macOS 14 Sonoma or newer."
+# every helper script runs on Apple's /usr/bin/python3 (part of the developer tools). With Xcode installed but its
+# license not accepted it refuses to start, and the install used to fail much later as "check your internet" (#10)
+if ! PY_OUT=$("${RECLAIMER_TEST_PYTHON:-/usr/bin/python3}" -c pass 2>&1); then
+  case "$PY_OUT" in
+    *"xcodebuild -license"*|*"Xcode license"*)
+      die "Xcode's license hasn't been accepted, so the helper scripts can't run. Run this in Terminal (it asks for your Mac password), then run the installer again:  sudo xcodebuild -license accept" ;;
+    *) die "Apple's developer tools are needed. Run this in Terminal, then run the installer again:  xcode-select --install" ;;
+  esac
+fi
 FREE_GB=$(df -g "$HOME" | awk 'NR==2 {print $4}')
 NEED_GB=45; [ -n "$ODST" ] && NEED_GB=54
 # (only a first install downloads the ~35 GB of game files; re-running it over an existing install needs ~1 GB)

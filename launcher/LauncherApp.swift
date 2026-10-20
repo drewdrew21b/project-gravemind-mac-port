@@ -102,6 +102,44 @@ func python(_ script: String, _ args: [String], onLine: @escaping @MainActor (St
                 onLine: onLine, onExit: onExit)
 }
 
+/// Can the helper scripts run? Off the main thread (python's first start can take a few seconds).
+func checkDevTools(_ done: @escaping @MainActor (DevTools) -> Void) {
+    DispatchQueue.global().async {
+        func run(_ path: String, _ args: [String]) -> (Int32?, String) {
+            let p = Process(), out = Pipe()
+            p.executableURL = URL(fileURLWithPath: path)
+            p.arguments = args
+            p.standardOutput = out
+            p.standardError = out
+            guard (try? p.run()) != nil else { return (nil, "") }
+            let text = String(decoding: out.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+            p.waitUntilExit()
+            return (p.terminationStatus, text)
+        }
+        let selected = run("/usr/bin/xcode-select", ["-p"]).0 == 0
+        // (only with tools selected: otherwise /usr/bin/python3 pops up macOS's install dialog by itself)
+        let (status, output) = selected ? run("/usr/bin/python3", ["-c", "pass"]) : (nil, "")
+        let state = devTools(selected: selected, pythonStatus: status, pythonOutput: output)
+        DispatchQueue.main.async { MainActor.assumeIsolated { done(state) } }
+    }
+}
+
+/// Accept Xcode's license (it needs an administrator): macOS's own password dialog. done(true) once accepted.
+func acceptXcodeLicense(_ done: @escaping @MainActor (Bool) -> Void) {
+    DispatchQueue.global().async {
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+        p.arguments = ["-e", "do shell script \"/usr/bin/xcodebuild -license accept\" with prompt "
+                       + "\"Project Reclaimer needs Xcode's license accepted to run its helper scripts.\" "
+                       + "with administrator privileges"]
+        p.standardOutput = FileHandle.nullDevice
+        p.standardError = FileHandle.nullDevice
+        var ok = false
+        if (try? p.run()) != nil { p.waitUntilExit(); ok = p.terminationStatus == 0 }
+        DispatchQueue.main.async { MainActor.assumeIsolated { done(ok) } }
+    }
+}
+
 /// Is any process matching this pattern running? Off the main thread: waiting on the main thread would run the
 /// main run loop and re-enter the window's timer.
 func processRunning(_ pattern: String, _ done: @escaping @MainActor (Bool) -> Void) {
@@ -222,6 +260,12 @@ func renderStates(to dir: URL) {
         }),
         ("4-steam-failed", { $0.update = .done("Up to date"); $0.steam = .failed("Sign-in didn't finish (Expired).") }),
         ("5-ready", { $0.update = .done("Updated to the latest version"); $0.steam = .done("Signed in as player123") }),
+        ("5-license", {
+            $0.needsLicense = true
+            $0.update = .warning("Xcode's license hasn't been accepted (an Xcode update asks again), so Project "
+                                 + "Reclaimer can't check for updates or download mods. Press Accept below: "
+                                 + "macOS asks for your password.")
+        }),
         ("6-offline", {
             $0.update = .warning("Couldn't check for updates right now. You can still play.")
             $0.steam = .warning("Can't reach Steam right now. Mods may download slowly from game servers.")
@@ -301,6 +345,13 @@ func renderStates(to dir: URL) {
                         Check(id: "tools", title: "Apple's developer tools", ok: false,
                               detail: "A small free Apple component the helper scripts use. Press the button below: macOS asks to install it (click Install, then Agree). It takes about 5 minutes.")]
             s.needsDevTools = true
+            s.phase = .blocked
+        }),
+        ("21-setup-license", false, { s in
+            s.checks = [Check(id: "mac", title: "Apple Silicon Mac, macOS 26", ok: true, detail: ""),
+                        Check(id: "tools", title: "Apple's developer tools", ok: false,
+                              detail: "They're installed with Xcode, but Xcode's license hasn't been accepted yet, so the helper scripts can't run. Press Accept below: macOS asks for your password.")]
+            s.needsLicense = true
             s.phase = .blocked
         }),
         ("22-setup-qr", false, { s in

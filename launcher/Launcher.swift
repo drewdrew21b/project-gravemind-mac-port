@@ -38,6 +38,8 @@ final class Launcher: ObservableObject {
     @Published var sound: Step? { didSet { if sound != oldValue, let s = sound { log("sound: \(s)") } } }
     @Published var notice: String?   // a plain-language note, e.g. after Tools stopped the game
     @Published var showTools = false
+    @Published var needsLicense = false  // Xcode's license isn't accepted: no helper script can run until it is
+    @Published var acceptingLicense = false
     /// Halo 3 was removed in Tools: Play turns into Install Halo 3, which opens the game checklist.
     @Published var halo3Missing = !FileManager.default.fileExists(atPath: mccFolder.appendingPathComponent("halo3/halo3.dll").path)
     @Published var showInstallGames = false
@@ -131,9 +133,31 @@ final class Launcher: ObservableObject {
                 update = .done("Checked when the game started")
                 steam = .done("Steam connected")
             } else {
-                runUpdate()  // (then the network check and Steam: never alongside an update's own network step)
-                checkSound()
+                checkDevTools { [self] state in
+                    guard state == .license else {
+                        runUpdate()  // (then the network check and Steam: never alongside an update's own network step)
+                        checkSound()
+                        return
+                    }
+                    needsLicense = true
+                    update = .warning("Xcode's license hasn't been accepted (an Xcode update asks again), so Project "
+                                      + "Reclaimer can't check for updates or download mods. Press Accept below: "
+                                      + "macOS asks for your password.")
+                }
             }
+        }
+    }
+
+    /// Xcode's license, behind macOS's password dialog; then the usual start.
+    func acceptLicense() {
+        acceptingLicense = true
+        acceptXcodeLicense { [self] accepted in
+            acceptingLicense = false
+            log("xcode license accepted: \(accepted)")
+            guard accepted else { return }
+            needsLicense = false
+            runUpdate()
+            checkSound()
         }
     }
 

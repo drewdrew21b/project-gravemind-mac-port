@@ -51,6 +51,18 @@ class InstallGuiTest(unittest.TestCase):
         self.assertNotEqual(rc, 0)
         self.assertEqual(errors, ["error: Need about 54 GB free disk space (have 50 GB)."])
 
+    def test_unaccepted_xcode_license_says_so(self):
+        # /usr/bin/python3 refuses to run until Xcode's license is accepted; the install then failed much later
+        # with "check your internet connection" (GitHub #10)
+        self.fake("python3", "echo \"You have not agreed to the Xcode license agreements. Please run 'sudo xcodebuild "
+                  "-license' from within a Terminal window.\" >&2; exit 69")
+        self.fake("curl", "exit 6")  # (so nothing downloads should the check let it through)
+        rc, errors = self.run_install(RECLAIMER_TEST_PYTHON=str(self.bin / "python3"))
+        self.assertNotEqual(rc, 0)
+        self.assertEqual(len(errors), 1, errors)
+        self.assertIn("Xcode's license", errors[0])
+        self.assertIn("sudo xcodebuild -license accept", errors[0])
+
     def test_download_failure_inside_a_helper_reaches_the_window(self):
         # fetch runs inside $(...): its error line used to be swallowed, leaving only "the install stopped"
         self.fake("curl", "exit 6")

@@ -19,6 +19,8 @@ final class SetupModel: ObservableObject {
     @Published var phase: Phase = .checking
     @Published var checks: [Check] = []
     @Published var needsDevTools = false
+    @Published var needsLicense = false  // Xcode is there, but its license isn't accepted yet
+    @Published var acceptingLicense = false
     @Published var waitingForDevTools = false
     @Published var steps: [String] = []
     @Published var progress: Double?
@@ -55,8 +57,28 @@ final class SetupModel: ObservableObject {
     }
 
     // 1. requirements
+    private var devToolsState = DevTools.ok
+
+    /// The checks, after finding out (off the main thread) whether the helper scripts can run.
     func runChecks() {
         phase = .checking
+        checkDevTools { [self] state in
+            devToolsState = state
+            listChecks()
+        }
+    }
+
+    /// Xcode's license, accepted behind macOS's password dialog; then the checks again.
+    func acceptLicense() {
+        acceptingLicense = true
+        acceptXcodeLicense { [self] accepted in
+            acceptingLicense = false
+            log("xcode license accepted: \(accepted)")
+            runChecks()
+        }
+    }
+
+    private func listChecks() {
         var list: [Check] = []
         let v = ProcessInfo.processInfo.operatingSystemVersion
         list.append(Check(id: "mac", title: "Apple Silicon Mac, macOS \(v.majorVersion)", ok: true, detail: ""))
@@ -70,10 +92,13 @@ final class SetupModel: ObservableObject {
                               detail: free >= neededGB ? "" :
                                 "\(withODST ? "Halo 3 and ODST need" : "Halo 3 needs") about \(Int(neededGB)) GB. Free up \(Int((neededGB - free).rounded(.up))) GB (empty the Trash, delete big downloads), then press Check Again."))
         }
-        let tools = commandSucceeds("/usr/bin/xcode-select", ["-p"])
-        needsDevTools = !tools
-        list.append(Check(id: "tools", title: "Apple's developer tools", ok: tools,
-                          detail: tools ? "" : "A small free Apple component the helper scripts use. Press the button below: macOS asks to install it (click Install, then Agree). It takes about 5 minutes."))
+        let tools = devToolsState
+        needsDevTools = tools == .missing
+        needsLicense = tools == .license
+        list.append(Check(id: "tools", title: "Apple's developer tools", ok: tools == .ok,
+                          detail: tools == .ok ? "" : tools == .license
+                            ? "They're installed with Xcode, but Xcode's license hasn't been accepted yet, so the helper scripts can't run. Press Accept below: macOS asks for your password."
+                            : "A small free Apple component the helper scripts use. Press the button below: macOS asks to install it (click Install, then Agree). It takes about 5 minutes."))
         if !commandSucceeds("/usr/bin/arch", ["-x86_64", "/usr/bin/true"]) {
             list.append(Check(id: "rosetta", title: "Rosetta (Apple's Intel translator)", ok: nil,
                               detail: "Installed during setup; macOS asks for your password."))
@@ -111,7 +136,7 @@ final class SetupModel: ObservableObject {
         Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] timer in
             MainActor.assumeIsolated {
                 guard let self else { return timer.invalidate() }
-                if self.commandSucceeds("/usr/bin/xcode-select", ["-p"]) {
+                if self.commandSucceeds("/usr/bin/xcode-select", ["-p"]) {  // (runChecks then tests python too)
                     timer.invalidate()
                     self.waitingForDevTools = false
                     self.runChecks()
@@ -251,6 +276,15 @@ struct SetupView: View {
                         }
                         .buttonStyle(.borderedProminent).tint(accent).disabled(m.waitingForDevTools)
                         if m.waitingForDevTools { ProgressView().controlSize(.small) }
+                    }
+                }
+                if m.needsLicense {
+                    HStack {
+                        Button(m.acceptingLicense ? "Waiting for your password…" : "Accept Xcode's license") {
+                            m.acceptLicense()
+                        }
+                        .buttonStyle(.borderedProminent).tint(accent).disabled(m.acceptingLicense)
+                        if m.acceptingLicense { ProgressView().controlSize(.small) }
                     }
                 }
                 if m.offersODST {
