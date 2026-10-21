@@ -434,6 +434,14 @@ func sdlGuid(vendorId: Int, productId: Int, version: Int = 0) -> String {
            version & 0xff, (version >> 8) & 0xff)
 }
 
+/// A device's reported name, safe as the name field of an SDL mapping line: no commas (field separators) or control
+/// characters (a newline would start a new mapping line, e.g. one for another pad's GUID).
+func sdlMappingName(_ raw: String?) -> String {
+    let cleaned = String((raw ?? "").map { $0 == "," || $0.unicodeScalars.contains { CharacterSet.controlCharacters.contains($0) } ? " " : $0 })
+        .split(separator: " ", omittingEmptySubsequences: true).joined(separator: " ")
+    return cleaned.isEmpty ? "Game Controller" : cleaned
+}
+
 /// SDL2-compatible wildcard GUID (crc=0, version=0, little-endian VID and PID).
 func sdlWildcardGuid(vendorId: Int, productId: Int) -> String {
     sdlGuid(vendorId: vendorId, productId: productId, version: 0)

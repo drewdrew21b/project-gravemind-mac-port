@@ -23,6 +23,7 @@ struct ControllerDevice: Identifiable, Equatable {
     let productId: Int
     let versionNumber: Int
     let guid: String
+    let axes: [AxisID]  // the pad's axes in SDL's order (read once: element lookups are slow)
 
     var isNintendo: Bool { vendorId == 0x057E }
     var isXbox: Bool { vendorId == 0x045E }
@@ -40,10 +41,7 @@ final class ControllerManager: ObservableObject {
     @Published var devices: [ControllerDevice] = []
     @Published var playerAssignments: [Int] = [0, 1, 2, 3]
     @Published var selectedPlayerIndex: Int = 0 {
-        didSet {
-            loadActiveMapping()
-            resetInputState()
-        }
+        didSet { selectionChanged() }
     }
     @Published var pingingIndex: Int?
 
@@ -73,7 +71,7 @@ final class ControllerManager: ObservableObject {
 
     var displayLeftTrigger: Double {
         if let binding = activeMapping["lefttrigger"] {
-            let axes = deviceAxisList(device: currentDevice?.device)
+            let axes = currentDevice?.axes ?? []
             if let idx = Int(binding.dropFirst()), axes.indices.contains(idx) {
                 let axis = axes[idx]
                 if axis.page == 2 && axis.usage == 0xC5 { return leftTrigger }
@@ -86,7 +84,7 @@ final class ControllerManager: ObservableObject {
     }
     var displayRightTrigger: Double {
         if let binding = activeMapping["righttrigger"] {
-            let axes = deviceAxisList(device: currentDevice?.device)
+            let axes = currentDevice?.axes ?? []
             if let idx = Int(binding.dropFirst()), axes.indices.contains(idx) {
                 let axis = axes[idx]
                 if axis.page == 2 && axis.usage == 0xC4 { return rightTrigger }
@@ -146,30 +144,6 @@ final class ControllerManager: ObservableObject {
     @Published var currentStep: CalibStep = .a
     @Published var statusMessage: String?
 
-    var isNintendoPositionalLayout: Bool {
-        return activeMapping["a"] == "b1"
-    }
-
-    func toggleNintendoLayout() {
-        guard let current = currentDevice, current.isNintendo else { return }
-        capturedMapping = activeMapping
-        if isNintendoPositionalLayout {
-            capturedMapping["a"] = "b0"
-            capturedMapping["b"] = "b1"
-            capturedMapping["x"] = "b2"
-            capturedMapping["y"] = "b3"
-            saveMapping()
-            statusMessage = "Switched to Nintendo Layout (Physical A=A, B=B)."
-        } else {
-            capturedMapping["a"] = "b1"
-            capturedMapping["b"] = "b0"
-            capturedMapping["x"] = "b3"
-            capturedMapping["y"] = "b2"
-            saveMapping()
-            statusMessage = "Switched to Xbox Layout (Bottom=A / Jump, Right=B)."
-        }
-    }
-
     private var capturedMapping: [String: String] = [:]
     private var hidManager: IOHIDManager?
     private var gcObservers: [NSObjectProtocol] = []
@@ -182,6 +156,8 @@ final class ControllerManager: ObservableObject {
     private var stickPeak: Double = 0.0
     private var stickAxis = AxisID(page: 0, usage: 0)
     private var stepArmedTime = Date()
+    private var calibratingDevice: IOHIDDevice?  // the pad a remap is for (stops if the selection changes)
+    private var pendingTriggerButton: Int?  // a button pressed on the LT/RT step: the trigger, unless an axis moved
 
     init() {
         start()
@@ -267,7 +243,7 @@ final class ControllerManager: ObservableObject {
             let vid = (IOHIDDeviceGetProperty(dev, "VendorID" as CFString) as? Int) ?? 0
             let pid = (IOHIDDeviceGetProperty(dev, "ProductID" as CFString) as? Int) ?? 0
             let usage = (IOHIDDeviceGetProperty(dev, "PrimaryUsage" as CFString) as? Int) ?? 0
-            let rawName = (IOHIDDeviceGetProperty(dev, "Product" as CFString) as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "Game Controller"
+            let rawName = IOHIDDeviceGetProperty(dev, "Product" as CFString) as? String
 
             let virtualCopy = (IOHIDDeviceGetProperty(dev, "HIDVirtualDevice" as CFString) as? Bool) ?? false
             guard !virtualCopy, vid > 0 && pid > 0, vid != 0x05AC, (usage == 5 || usage == 4 || vid == 0x2DC8 || vid == 0x057E) else {
@@ -275,14 +251,15 @@ final class ControllerManager: ObservableObject {
             }
 
             let ver = (IOHIDDeviceGetProperty(dev, "VersionNumber" as CFString) as? Int) ?? 0
-            let name = (vid == 0x057E && rawName.isEmpty) ? "Nintendo Switch Controller" : rawName
+            var name = sdlMappingName(rawName)
+            if vid == 0x057E && name == sdlMappingName(nil) { name = "Nintendo Switch Controller" }
             let guid = sdlWildcardGuid(vendorId: vid, productId: pid)
 
             let id = "\(vid)-\(pid)-\(idx)"
             found.append(ControllerDevice(id: id, device: dev, name: name,
                                           vendorId: vid, productId: pid,
                                           versionNumber: ver,
-                                          guid: guid))
+                                          guid: guid, axes: axisList(of: dev)))
         }
 
         self.devices = found
@@ -295,6 +272,11 @@ final class ControllerManager: ObservableObject {
             selectedPlayerIndex = max(0, found.count - 1)
         }
         loadActiveMapping()
+    }
+
+    func selectionChanged() {
+        loadActiveMapping()
+        resetInputState()
     }
 
     private func resetInputState() {
@@ -341,13 +323,16 @@ final class ControllerManager: ObservableObject {
 
     private func loadActiveMapping() {
         defer { attachGameController() }
+        if calibrating && currentDevice?.device != calibratingDevice {
+            calibrating = false
+            statusMessage = "Remap stopped: the selected controller changed."
+        }
         guard let current = currentDevice, !current.guid.isEmpty else {
             hasActiveMapping = false
             activeMapping = [:]
             return
         }
-        let baseDir = URL(fileURLWithPath: (ProcessInfo.processInfo.environment["RECLAIMER_HOME"]
-                                            ?? "\(NSHomeDirectory())/Games/ProjectReclaimer"))
+        let baseDir = home
         let bundledDb = baseDir.appendingPathComponent("game/gamecontrollerdb.txt")
         let userMappings = baseDir.appendingPathComponent("controller-mappings.txt")
 
@@ -370,6 +355,8 @@ final class ControllerManager: ObservableObject {
             if let content = try? String(contentsOf: path, encoding: .utf8) {
                 for line in content.components(separatedBy: .newlines).reversed() {
                     if line.starts(with: current.guid) {
+                        // (a line replaces earlier ones for this pad, as in SDL)
+                        if knownLayout(vendor: current.vendorId) == nil { activeMapping = [:] }
                         let parts = line.components(separatedBy: ",")
                         for part in parts.dropFirst(2) {
                             let kv = part.components(separatedBy: ":")
@@ -485,14 +472,19 @@ final class ControllerManager: ObservableObject {
                 let btn = Int(usage - 1)
                 if intVal == 1 {
                     pressedButtons.insert(btn)
-                    if calibrating && currentStep != .lt && currentStep != .rt && currentStep != .lup && currentStep != .rup {
+                    if calibrating && (currentStep == .lt || currentStep == .rt) {
+                        if pendingTriggerButton == nil { pendingTriggerButton = btn }
+                    } else if calibrating && currentStep != .lup && currentStep != .rup {
                         if canAdvanceStep {
                             recordCalibrationButton(btn)
                         }
                     }
                 } else {
                     pressedButtons.remove(btn)
-                    if calibrating && awaitingButtonRelease && pressedButtons.isEmpty {
+                    if calibrating && (currentStep == .lt || currentStep == .rt) && pendingTriggerButton == btn {
+                        pendingTriggerButton = nil
+                        if !triggerArmed { recordTrigger("b\(btn)") }  // (no axis moved: a digital trigger)
+                    } else if calibrating && awaitingButtonRelease && pressedButtons.isEmpty {
                         awaitingButtonRelease = false
                         Task { @MainActor in
                             try? await Task.sleep(nanoseconds: 50_000_000)
@@ -501,7 +493,7 @@ final class ControllerManager: ObservableObject {
                     }
                 }
             } else if page == 1 { // Generic Desktop (Sticks / D-Pad / 360 Triggers)
-                let is360Style = hasSeparateRyAxis(device: currentDevice?.device)
+                let is360Style = currentDevice?.axes.contains(AxisID(page: 1, usage: 0x34)) == true
                 if usage == 0x39 { // Hat switch (D-Pad)
                     let hat = hatDirections(intVal, min: lo, max: hi)
                     dpadState = (hat.up, hat.down, hat.left, hat.right)
@@ -545,71 +537,56 @@ final class ControllerManager: ObservableObject {
         }
     }
 
-    private func deviceAxisList(device: IOHIDDevice?) -> [AxisID] {
-        guard let device else {
-            return [AxisID(page: 1, usage: 0x30), AxisID(page: 1, usage: 0x31),
-                    AxisID(page: 1, usage: 0x32), AxisID(page: 1, usage: 0x35)]
-        }
-        guard let elements = IOHIDDeviceCopyMatchingElements(device, nil, 0) as? [IOHIDElement] else {
-            return [AxisID(page: 1, usage: 0x30), AxisID(page: 1, usage: 0x31),
-                    AxisID(page: 1, usage: 0x32), AxisID(page: 1, usage: 0x35)]
-        }
+    /// The pad's axes in the order SDL's IOKit driver numbers them (sorted by usage; Generic Desktop X…Wheel, then
+    /// Simulation rudder, throttle, accelerator and brake).
+    private func axisList(of device: IOHIDDevice) -> [AxisID] {
+        let fallback = [AxisID(page: 1, usage: 0x30), AxisID(page: 1, usage: 0x31),
+                        AxisID(page: 1, usage: 0x32), AxisID(page: 1, usage: 0x35)]
+        guard let elements = IOHIDDeviceCopyMatchingElements(device, nil, 0) as? [IOHIDElement] else { return fallback }
         var axes = Set<AxisID>()
         for elem in elements {
             let type = IOHIDElementGetType(elem)
             guard type == kIOHIDElementTypeInput_Axis || type == kIOHIDElementTypeInput_Misc else { continue }
             let page = Int(IOHIDElementGetUsagePage(elem))
             let usage = Int(IOHIDElementGetUsage(elem))
-            if page == 1 && usage >= 0x30 && usage <= 0x38 {
-                axes.insert(AxisID(page: page, usage: usage))
-            } else if page == 2 && usage >= 0xC4 && usage <= 0xC6 {
+            if (page == 1 && (0x30...0x38).contains(usage)) || (page == 2 && [0xBA, 0xBB, 0xC4, 0xC5].contains(usage)) {
                 axes.insert(AxisID(page: page, usage: usage))
             }
         }
-        return axes.isEmpty ? [AxisID(page: 1, usage: 0x30), AxisID(page: 1, usage: 0x31),
-                               AxisID(page: 1, usage: 0x32), AxisID(page: 1, usage: 0x35)] : axes.sorted()
-    }
-
-    private func hasSeparateRyAxis(device: IOHIDDevice?) -> Bool {
-        deviceAxisList(device: device).contains(AxisID(page: 1, usage: 0x34))
+        return axes.isEmpty ? fallback : axes.sorted()
     }
 
     private func handleTriggerCalibration(page: Int, usage: Int, value: Double) {
-        guard calibrating, let dev = currentDevice else { return }
+        guard calibrating, currentStep == .lt || currentStep == .rt, let dev = currentDevice else { return }
         let currentAxis = AxisID(page: page, usage: usage)
+        if value > 0.5 {
+            triggerArmed = true
+            triggerAxis = currentAxis
+        } else if value < 0.2 && triggerArmed {
+            triggerArmed = false
+            let target = triggerAxis.page > 0 ? triggerAxis : currentAxis
+            triggerAxis = AxisID(page: 0, usage: 0)
+            if let idx = dev.axes.firstIndex(of: target) { recordTrigger("a\(idx)") }  // (else: Skip)
+        }
+    }
+
+    /// LT or RT captured: an axis ("aN") or, for a digital trigger, a button ("bN").
+    private func recordTrigger(_ binding: String) {
+        pendingTriggerButton = nil
+        triggerArmed = false
         if currentStep == .lt {
-            if value > 0.5 {
-                triggerArmed = true
-                triggerAxis = currentAxis
-            } else if value < 0.2 && triggerArmed {
-                triggerArmed = false
-                let axes = deviceAxisList(device: dev.device)
-                let target = triggerAxis.page > 0 ? triggerAxis : currentAxis
-                let idx = axes.firstIndex(of: target) ?? (axes.count > 4 ? 5 : 2)
-                capturedMapping["lefttrigger"] = "a\(idx)"
-                triggerAxis = AxisID(page: 0, usage: 0)
-                currentStep = .rt
-                stepArmedTime = Date()
-            }
+            capturedMapping["lefttrigger"] = binding
+            currentStep = .rt
+            stepArmedTime = Date()
         } else if currentStep == .rt {
-            if value > 0.5 {
-                triggerArmed = true
-                triggerAxis = currentAxis
-            } else if value < 0.2 && triggerArmed {
-                triggerArmed = false
-                let axes = deviceAxisList(device: dev.device)
-                let target = triggerAxis.page > 0 ? triggerAxis : currentAxis
-                let idx = axes.firstIndex(of: target) ?? (axes.count > 5 ? 4 : 5)
-                capturedMapping["righttrigger"] = "a\(idx)"
-                triggerAxis = AxisID(page: 0, usage: 0)
-                currentStep = .back
-                canAdvanceStep = false
-                awaitingButtonRelease = false
-                stepArmedTime = Date()
-                Task { @MainActor in
-                    try? await Task.sleep(nanoseconds: 100_000_000)
-                    self.canAdvanceStep = true
-                }
+            capturedMapping["righttrigger"] = binding
+            currentStep = .back
+            canAdvanceStep = false
+            awaitingButtonRelease = false
+            stepArmedTime = Date()
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 100_000_000)
+                self.canAdvanceStep = true
             }
         }
     }
@@ -626,7 +603,7 @@ final class ControllerManager: ObservableObject {
                 }
             } else if abs(pos) < 0.25 && stickArmed {
                 stickArmed = false
-                let axes = deviceAxisList(device: dev.device)
+                let axes = dev.axes
                 let yAxis = stickAxis.page > 0 ? stickAxis : currentAxis
                 let yIndex = axes.firstIndex(of: yAxis) ?? 1
                 let xIndex = axes.firstIndex(of: AxisID(page: 1, usage: 0x30)) ?? 0
@@ -651,7 +628,7 @@ final class ControllerManager: ObservableObject {
                 }
             } else if abs(pos) < 0.25 && stickArmed {
                 stickArmed = false
-                let axes = deviceAxisList(device: dev.device)
+                let axes = dev.axes
                 let yAxis = stickAxis.page > 0 ? stickAxis : currentAxis
                 let yIndex = axes.firstIndex(of: yAxis) ?? (axes.count > 4 ? 4 : 3)
                 let xUsage = (yAxis.usage == 0x34) ? 0x33 : 0x32
@@ -674,8 +651,6 @@ final class ControllerManager: ObservableObject {
         if capturedMapping["lefty"] == nil { capturedMapping["lefty"] = activeMapping["lefty"] ?? "a1" }
         if capturedMapping["rightx"] == nil { capturedMapping["rightx"] = activeMapping["rightx"] ?? "a2" }
         if capturedMapping["righty"] == nil { capturedMapping["righty"] = activeMapping["righty"] ?? "a3" }
-        if capturedMapping["lefttrigger"] == nil { capturedMapping["lefttrigger"] = activeMapping["lefttrigger"] ?? "a5" }
-        if capturedMapping["righttrigger"] == nil { capturedMapping["righttrigger"] = activeMapping["righttrigger"] ?? "a4" }
         saveMapping()
         currentStep = .done
         calibrating = false
@@ -716,8 +691,10 @@ final class ControllerManager: ObservableObject {
 
     func startCalibration() {
         calibrating = true
+        calibratingDevice = currentDevice?.device
+        pendingTriggerButton = nil
         currentStep = .a
-        capturedMapping = activeMapping
+        capturedMapping = hasActiveMapping ? activeMapping : [:]  // (what was mapped before, never the raw view's guesses)
         canAdvanceStep = true
         awaitingButtonRelease = false
         triggerArmed = false
@@ -732,6 +709,7 @@ final class ControllerManager: ObservableObject {
     func skipStep() {
         guard calibrating else { return }
         canAdvanceStep = true
+        pendingTriggerButton = nil
         awaitingButtonRelease = false
         triggerArmed = false
         triggerAxis = AxisID(page: 0, usage: 0)
@@ -807,7 +785,7 @@ final class ControllerManager: ObservableObject {
             .filter { $0.key != "platform" }
             .map { "\($0.key):\($0.value)" }
             .joined(separator: ",")
-        let safeName = current.name.replacingOccurrences(of: ",", with: " ")
+        let safeName = sdlMappingName(current.name)
         let wildcardGuid = sdlWildcardGuid(vendorId: current.vendorId, productId: current.productId)
         var newLines = ["\(wildcardGuid),\(safeName),\(mapEntries),platform:Mac OS X,\n"]
         var guidsToRemove = [wildcardGuid]
@@ -821,8 +799,7 @@ final class ControllerManager: ObservableObject {
         let addedText = newLines.joined()
 
         // Calibrations live in ~/Games/ProjectReclaimer/controller-mappings.txt so installer updates never touch them
-        let baseDir = URL(fileURLWithPath: (ProcessInfo.processInfo.environment["RECLAIMER_HOME"]
-                                            ?? "\(NSHomeDirectory())/Games/ProjectReclaimer"))
+        let baseDir = home
         let userMappingsPath = baseDir.appendingPathComponent("controller-mappings.txt")
 
         if let existing = try? String(contentsOf: userMappingsPath, encoding: .utf8) {
@@ -1034,13 +1011,6 @@ struct ControllerSheet: View {
                             }
                         }
                         Spacer()
-                        if dev.isNintendo && !c.calibrating {
-                            Button(c.isNintendoPositionalLayout ? "Switch to Nintendo Layout" : "Switch to Xbox Layout") {
-                                c.toggleNintendoLayout()
-                            }
-                            .controlSize(.small)
-                            .help("Switch between Xbox layout (bottom=A/Jump) and printed Nintendo labels")
-                        }
                     }
                     .padding(8)
                     .background(RoundedRectangle(cornerRadius: 6).fill(Color(nsColor: .controlBackgroundColor).opacity(0.6)))
@@ -1260,6 +1230,7 @@ struct ControllerSheet: View {
             set: { newDevIdx in
                 if c.playerAssignments.indices.contains(playerIdx) {
                     c.playerAssignments[playerIdx] = newDevIdx
+                    c.selectionChanged()
                 }
             }
         )
