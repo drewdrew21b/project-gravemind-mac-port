@@ -344,7 +344,8 @@ class ToolsTest(unittest.TestCase):
         self.fake_mcc(halo3=False, odst=False)
         (self.home / "halo3-removed").write_text("")
         tools = self.load()
-        with mock.patch.object(tools.helper(), "game_download", return_value="ok") as download:
+        with mock.patch.object(tools.helper(), "game_download", return_value="ok") as download, \
+                mock.patch.object(tools.shutil, "disk_usage", return_value=mock.Mock(free=200 * 10**9)):
             self.assertEqual(tools.add_games(["odst"]), "ok")
             download.assert_called_with(str(tools.MCC_DIR), ["976731", "1064222"])
             self.assertTrue((self.home / "halo3-removed").exists())
@@ -379,7 +380,8 @@ class ToolsTest(unittest.TestCase):
         self.fake_mcc(halo3=False)
         (self.home / "halo3-removed").write_text("")
         tools = self.load()
-        with mock.patch.object(tools.helper(), "game_download", return_value="error: Couldn't reach Steam."):
+        with mock.patch.object(tools.helper(), "game_download", return_value="error: Couldn't reach Steam."), \
+                mock.patch.object(tools.shutil, "disk_usage", return_value=mock.Mock(free=200 * 10**9)):
             self.assertEqual(tools.add_games(["halo3"]), "error: Couldn't reach Steam.")
         self.assertTrue((self.home / "halo3-removed").exists())
 
