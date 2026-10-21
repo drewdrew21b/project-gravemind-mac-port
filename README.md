@@ -11,7 +11,7 @@ and adds a **Project Reclaimer** app to your Mac.
 
 ## Requirements
 
-- Apple Silicon Mac (M1 or newer), macOS 14 Sonoma or newer, 16 GB RAM recommended
+- Apple Silicon Mac (M1 or newer), macOS 14 Sonoma or newer, 16 GB RAM recommended (on 8 GB, Forge's first build may never finish)
 - **Halo: The Master Chief Collection on Steam**, plus the Steam app on your phone (to sign in with a QR code)
 - ~45 GB free disk space (~54 GB with Halo 3: ODST)
 - Your Mac's admin password once
