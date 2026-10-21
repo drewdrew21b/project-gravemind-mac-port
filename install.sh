@@ -178,6 +178,13 @@ if [ ! -f "$BASE/prefix-wine/system.reg" ]; then
   WINEPREFIX="$BASE/prefix-wine" WINEDEBUG=-all WINEDLLOVERRIDES="mscoree,mshtml=" "$WINE_BIN/wine" wineboot -i >/dev/null 2>&1 || true
   WINEPREFIX="$BASE/prefix-wine" WINEDEBUG=-all "$WINE_BIN/wineserver" -w
 fi
+# controllers come to the game from SDL. For PlayStation pads Wine otherwise drops SDL's gamepad for a raw PS device
+# ("hidraw"), which the game can't use: "no gamepad detected" (#17). Xbox and other pads come from SDL either way.
+if ! grep -q '"DisableHidraw"=dword:00000001' "$BASE/prefix-wine/system.reg" 2>/dev/null; then
+  WINEPREFIX="$BASE/prefix-wine" WINEDEBUG=-all "$WINE_BIN/wine" reg add 'HKLM\System\CurrentControlSet\Services\winebus' \
+    /v DisableHidraw /t REG_DWORD /d 1 /f >/dev/null 2>&1 || true
+  WINEPREFIX="$BASE/prefix-wine" WINEDEBUG=-all "$WINE_BIN/wineserver" -w
+fi
 unlink_documents "$BASE/prefix-wine"
 # DXVK-macOS goes into this prefix's system32 so the shared game folder stays free of graphics DLLs. Its d3d11.dll is
 # renamed d3d11_dxvk.dll behind spinfix's d3d11.dll, which forwards to it and stops Halo 3's engine thread from
