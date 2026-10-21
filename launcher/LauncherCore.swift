@@ -453,9 +453,8 @@ struct StartupDisplay: Equatable {
     var warning: Bool { look == .warning }
 
     /// Startup is over: the game showed its own completion marker. Final, so it can never decay back to "Starting the
-    /// game": the log keeps growing past the 400 KB the command reads, and its marker falls out of that tail, so a
-    /// later poll would answer "starting" again for a game that is up. Polling stops on this, which is also why
-    /// there is nothing to ask afterwards.
+    /// game", and polling stops on it (each poll reads the whole log, which keeps growing), which is also why there is
+    /// nothing to ask afterwards.
     var settled: Bool { look == .done }
 
     /// The same row with a stop in flight: its actions are taken away, so a second click can't run a second stop and

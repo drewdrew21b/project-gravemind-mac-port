@@ -764,7 +764,8 @@ final class Launcher: ObservableObject {
             return gameEnded(early: false)
         }
         processRunning(gameProcess) { [self] gameUp in
-            guard playing else { return }
+            // (checked again: a Try Again or Force Quit may have started while the check ran)
+            guard mayWatchForGameGone(playing: playing, stopping: stopping) else { return }
             if game?.isRunning == true || gameUp {
                 gameGoneSince = nil
                 return
