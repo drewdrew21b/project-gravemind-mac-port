@@ -231,5 +231,10 @@ check(readsThroughGameController(vendor: 0x054C) && !readsThroughGameController(
 check(knownLayout(vendor: 0x054C)?["back"] == "b\(GCButton.back.rawValue)"
       && knownLayout(vendor: 0x054C)?["y"] == "b\(GCButton.y.rawValue)", "PlayStation layout follows GCButton")
 
+// memory, as fit.py decides it: under 16 GB is constrained (and unknown RAM isn't)
+check(memoryGigabytes(8 * 1 << 30) == 8 && isConstrainedMemory(8 * 1 << 30), "8 GB Mac: constrained")
+check(!isConstrainedMemory(16 * 1 << 30) && !isConstrainedMemory(0), "16 GB and unknown: not constrained")
+check(friendlyStep("This Mac") == "Checking this Mac's memory", "installer's This Mac step")
+
 print(failures == 0 ? "All launcher tests passed" : "\(failures) launcher test(s) failed")
 exit(failures == 0 ? 0 : 1)
