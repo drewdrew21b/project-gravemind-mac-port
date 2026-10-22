@@ -27,7 +27,7 @@ class ToolsTest(unittest.TestCase):
         for d in ("game", "logs", "tools", WORKSHOP / "content" / "976730"):
             (self.home / d).mkdir(parents=True)
         # the helper scripts sit next to tools.py in an install's game folder
-        for f in ("workshop_helper.py", "presets.py", "fit.py"):
+        for f in ("workshop_helper.py", "presets.py", "fit.py", "game_process.py"):
             shutil.copy(REPO / "scripts" / f, self.home / "game" / f)
         shutil.copy(TOOLS, self.home / "game" / "tools.py")
         self.apps = self.tmp / "Applications"
@@ -173,7 +173,7 @@ class ToolsTest(unittest.TestCase):
 
     def start_fake_game(self):
         game = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)",
-                                 "h2gravemind.exe"])
+                                 "h2gravemind.exe"], cwd=self.home / "game")
 
         def stop():  # (kill and reap, so no ResourceWarning about a still-running child)
             game.kill()
@@ -283,7 +283,7 @@ class ToolsTest(unittest.TestCase):
     def test_remove_mod_refuses_while_the_game_runs_and_rejects_odd_ids(self):
         self.add_mod("111", "Warlock", 10)
         game = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)",
-                                 "h2gravemind.exe"])
+                                 "h2gravemind.exe"], cwd=self.home / "game")
         try:
             self.assertEqual(self.run_tool("remove-mod", "111")[1][-1], "error: Quit the game first.")
         finally:
@@ -422,7 +422,7 @@ class ToolsTest(unittest.TestCase):
     # ---- force quit / uninstall --------------------------------------------------------------------------------
     def test_force_quit_stops_the_game(self):
         game = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)",
-                                 "h2gravemind.exe"])
+                                 "h2gravemind.exe"], cwd=self.home / "game")
         try:
             rc, out = self.run_tool("force-quit")
             self.assertEqual(out[-1], "ok")
@@ -439,7 +439,7 @@ class ToolsTest(unittest.TestCase):
         ws.write_text("#!/bin/sh\nsleep 120\n")
         ws.chmod(0o755)
         game = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)",
-                                 "h2gravemind.exe"])
+                                 "h2gravemind.exe"], cwd=self.home / "game")
         try:
             rc, out = self.run_tool("force-quit")
             self.assertEqual(out[-1], "ok", out)

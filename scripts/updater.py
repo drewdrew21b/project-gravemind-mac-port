@@ -14,6 +14,7 @@ updates never stop the game from starting.
 """
 import fcntl
 import hashlib
+import importlib.util
 import json
 import os
 import re
@@ -38,8 +39,6 @@ RELEASE_API = os.environ.get("GRAVEMIND_RELEASE_API", "https://api.github.com/re
                              "h2gravemind-releases/releases/latest")
 RELEASES_API = os.environ.get("GRAVEMIND_RELEASES_API", "https://api.github.com/repos/BriRoz1/"
                               "h2gravemind-releases/releases?per_page=100")
-GAME_PROCESS = os.environ.get("GRAVEMIND_GAME_PROCESS",
-                              re.escape(str(GAME)) + r"/(?:gravemind|versions/v[0-9.]+)/h2gravemind\.exe")
 UA = {"User-Agent": "project-gravemind-mac-port"}
 
 
@@ -84,8 +83,15 @@ def sha256(path):
     return h.hexdigest()
 
 
+# game_process.py from this install: the one rule for which running processes are this installation's game.
+# (game_process.py owns that rule and says why it is loaded by exact path.)
+_spec = importlib.util.spec_from_file_location("game_process", Path(__file__).resolve().parent / "game_process.py")
+game_process = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(game_process)
+
+
 def game_running():
-    return subprocess.run(["pgrep", "-a", "-f", GAME_PROCESS], capture_output=True).returncode == 0  # (-a: see helper)
+    return game_process.running(BASE)
 
 
 # ---------------------------------------------------------------------------------------------------------------
@@ -136,7 +142,6 @@ def update_port():
             except ProcessLookupError:
                 pass
             sys.exit(128 + signum)
-
         signal.signal(signal.SIGTERM, stop_installer)
         tail = []
         steps = 0

@@ -37,8 +37,6 @@ MCC_DIR = STEAMAPPS / "common" / "Halo The Master Chief Collection"
 APP = Path(os.environ.get("RECLAIMER_APP_PATH")
            or Path(os.environ.get("RECLAIMER_APPS_DIR", HOME / "Applications")) / "Project Gravemind.app")
 DESKTOP = Path(os.environ.get("RECLAIMER_DESKTOP", HOME / "Desktop"))
-GAME_PROCESS = os.environ.get("GRAVEMIND_GAME_PROCESS",
-                              re.escape(str(GAME)) + r"/(?:gravemind|versions/v[0-9.]+)/h2gravemind\.exe")
 # How long the Forge asset library may write nothing before startup is called stalled. The first build takes about a
 # minute on the hardware it was tuned for; three minutes of no writes means it is not going to finish on its own.
 try:
@@ -51,8 +49,12 @@ def say(line):
     print(line, flush=True)
 
 
+# game_process.py from this install: the one rule for which running processes are this installation's game.
+_spec = importlib.util.spec_from_file_location("game_process", Path(__file__).resolve().parent / "game_process.py")
+game_process = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(game_process)
 def game_running():
-    return subprocess.run(["pgrep", "-a", "-f", GAME_PROCESS], capture_output=True).returncode == 0
+    return game_process.running(BASE)
 
 
 def helper():
@@ -202,7 +204,7 @@ def cache_progress(folder):
 
 def game_elapsed_seconds():
     """How long the game client has been running, or None if it isn't."""
-    pids = subprocess.run(["pgrep", "-f", GAME_PROCESS], capture_output=True, text=True).stdout.split()
+    pids = game_process.pids(BASE)
     if not pids:
         return None
     stamp = subprocess.run(["ps", "-o", "etime=", "-p", pids[0]], capture_output=True, text=True).stdout.strip()
@@ -282,8 +284,13 @@ def startup_state():
 
 
 def force_quit():
-    # the game first, by force: a frozen game often comes with a stuck wineserver, which must not stop this
-    subprocess.run(["pkill", "-9", "-a", "-f", GAME_PROCESS], capture_output=True)
+    # the game first, by force: a frozen game often comes with a stuck wineserver, which must not stop this.
+    # Only this install's game: another checkout's game (or another test run's) is not ours to kill.
+    for pid in game_process.pids(BASE):
+        try:
+            os.kill(int(pid), signal.SIGKILL)
+        except (ProcessLookupError, ValueError):  # (it exited between the match and the kill)
+            pass
     env = dict(os.environ, WINEPREFIX=str(BASE / "prefix-wine"))
     wineserver = BASE / "wine" / "Wine Staging.app" / "Contents" / "Resources" / "wine" / "bin" / "wineserver"
     if wineserver.exists():

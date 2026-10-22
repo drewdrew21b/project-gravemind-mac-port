@@ -16,7 +16,7 @@ RESOURCES="$APP/Contents/Resources"
 mkdir -p "$RESOURCES/scripts" "$RESOURCES/launcher"
 cp install.sh VERSION "$RESOURCES/"
 cp launcher/ProjectReclaimer "$RESOURCES/launcher/ProjectReclaimer"
-for f in run.sh launch.sh gamecontrollerdb.txt workshop_helper.py updater.py tools.py make_app.sh; do
+for f in run.sh launch.sh gamecontrollerdb.txt game_process.py workshop_helper.py updater.py tools.py make_app.sh; do
    cp "scripts/$f" "$RESOURCES/scripts/$f"
 done
 # no ReclaimerHome key: that marks the installed copy (see LauncherApp.swift), this one installs or hands off

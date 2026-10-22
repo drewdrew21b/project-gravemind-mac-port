@@ -383,14 +383,16 @@ check(sStopping?.actions.isEmpty == true, "a stop in flight offers no actions: \
 check(sStopping?.look == .working, "a stop in flight is working, not a warning")
 check(sStopping?.title == "Stopping the game", "a stop in flight says what it is doing: \(sStopping?.title ?? "-")")
 check(mayStop(stopping: false) && !mayStop(stopping: true), "a second stop cannot start over a stop in flight")
+// the update watchdog counts from when the update started, not from when the window opened (#30): an update that
+// started after the license step, or late in a session, used to get less than its ten minutes, or none
+let updateT0 = Date(timeIntervalSince1970: 1_000_000)
+check(!updateOverdue(startedAt: updateT0, now: updateT0.addingTimeInterval(599)), "an update gets its full ten minutes")
+check(updateOverdue(startedAt: updateT0, now: updateT0.addingTimeInterval(601)), "a stuck update is stopped after ten minutes")
+check(!updateOverdue(startedAt: nil, now: updateT0), "no update, nothing to stop")
 check(mayWatchForGameGone(playing: true, stopping: false), "a running game is watched")
 check(!mayWatchForGameGone(playing: true, stopping: true),
       "while stopping, the game going away is expected: never judged gone")
 check(!mayWatchForGameGone(playing: false, stopping: false), "nothing is watched when nothing plays")
-let updateT0 = Date(timeIntervalSince1970: 1_000_000)
-check(!updateOverdue(startedAt: updateT0, now: updateT0.addingTimeInterval(599)), "an update gets its full ten minutes")
-check(updateOverdue(startedAt: updateT0, now: updateT0.addingTimeInterval(601)), "a stuck update is stopped after ten minutes")
-check(!updateOverdue(startedAt: nil, now: updateT0), "no active update is not overdue")
 
 // the note before Play is for the first start: once the Forge library exists there is no long build to expect
 let noCacheAnswer = #"{"state": "stopped", "elapsed_s": null, "stall_after_s": 180, "wrote_this_run": false, "forge_cache": {"bytes": 0, "files": 0, "newest_age_s": null}}"#
@@ -433,6 +435,21 @@ for (ramGB, expected) in [(8, Tier.constrained), (16, Tier.standard)] {
           "Setup's memory check agrees with fit.py's tier at \(ramGB) GB")
 }
 check(friendlyStep("Launcher app") == "Adding Project Gravemind to Applications", "installer's launcher step")
+
+// which running processes are this installation's: the working directory decides, by whole path components
+check(insideInstall("/Users/p/Games/ProjectReclaimer/game", root: "/Users/p/Games/ProjectReclaimer"),
+      "the game folder is inside")
+check(insideInstall("/Users/p/Games/ProjectReclaimer/game/versions", root: "/Users/p/Games/ProjectReclaimer"),
+      "an older release's folder is inside")
+check(insideInstall("/Users/p/Games/ProjectReclaimer", root: "/Users/p/Games/ProjectReclaimer/"),
+      "the install itself, with a trailing slash on the root")
+check(!insideInstall("/Users/p/Games/ProjectReclaimer2/game", root: "/Users/p/Games/ProjectReclaimer"),
+      "a sibling whose name starts the same is not inside")
+check(!insideInstall("/Users/p/Games/ProjectReclaimer", root: "/Users/p/Games/ProjectReclaimer/game"),
+      "the install is not inside its own game folder")
+check(!insideInstall("/", root: "/Users/p/Games/ProjectReclaimer"), "root is not inside an install")
+check(insideInstall("/private/var/folders/x/PR/game", root: "/var/folders/x/PR"),
+      "lsof's real path matches the path the window was given")
 
 print(failures == 0 ? "All launcher tests passed" : "\(failures) launcher test(s) failed")
 exit(failures == 0 ? 0 : 1)

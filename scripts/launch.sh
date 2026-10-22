@@ -12,4 +12,7 @@ fi
 export RECLAIMER_LOG
 mkdir -p "$RECLAIMER_HOME/logs"
 : > "$RECLAIMER_LOG"
+# Start the helper from the install folder so it can identify this install's game process.
+cd "$RECLAIMER_HOME/game" || exit 1
+/usr/bin/python3 -I "$RECLAIMER_HOME/game/workshop_helper.py" watch >> "$RECLAIMER_HOME/logs/workshop-helper.log" 2>&1 &
 exec "$RECLAIMER_HOME/game/run.sh" > "$RECLAIMER_LOG" 2>&1

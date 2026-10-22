@@ -3,9 +3,8 @@
 Pointers for contributors and coding agents. The README is for players; this file is for changing the port.
 
 ## Layout
-
 - `install.sh`: installs and updates Project Gravemind and its Halo 2 files (also re-run by the app on every Mac port update).
-- `scripts/`: what lands in `~/Games/ProjectGravemind/game/`: `run.sh` (starts Gravemind under Wine), `updater.py` (checks Gravemind GitHub releases), `tools.py` (game files and diagnostics), and `workshop_helper.py` (Steam QR sign-in and MCC game downloads).
+- `scripts/`: what lands in `~/Games/ProjectGravemind/game/`: `run.sh` (starts Gravemind under Wine), `launch.sh` (starts the game and Workshop helper), `updater.py` (checks Gravemind GitHub releases), `tools.py` (game files and diagnostics), `game_process.py` (identifies this install's running game), and `workshop_helper.py` (Steam QR sign-in and MCC game downloads).
 - `launcher/*.swift`: the app window (SwiftUI). Pure, tested logic lives in `LauncherCore.swift`; tests in `launcher/Tests/main.swift`.
 - `docs/specs/` (plans), `docs/adr/` (decisions, including things that don't work).
 

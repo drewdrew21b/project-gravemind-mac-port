@@ -157,7 +157,7 @@ fi
 note "ok"
 
 bold "Game scripts and Steam downloader helper"
-for f in run.sh launch.sh gamecontrollerdb.txt workshop_helper.py updater.py tools.py; do
+for f in run.sh launch.sh gamecontrollerdb.txt game_process.py workshop_helper.py updater.py tools.py; do
   script_file "scripts/$f" "$BASE/game/$f"
 done
 chmod +x "$BASE/game/run.sh" "$BASE/game/launch.sh" "$BASE/game/workshop_helper.py" "$BASE/game/updater.py" \
