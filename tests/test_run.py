@@ -6,6 +6,7 @@ import os
 import shutil
 import subprocess
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -84,6 +85,34 @@ class RunTest(unittest.TestCase):
         self.assertIn("cfgfile=", out)
         self.assertNotIn("cfgfile=/", out)
         self.assertFalse((self.home / "controller-mappings-active.txt").exists())
+
+
+class LaunchTest(unittest.TestCase):
+    """scripts/launch.sh (the Play button): the helper and the game start from the game folder, wherever it's run from,
+    since that's how the install-scoped process rule (game_process.py) tells this install's processes apart."""
+
+    def setUp(self):
+        self.home = Path(tempfile.mkdtemp()).resolve()
+        game = self.home / "game"
+        game.mkdir()
+        shutil.copy(REPO / "scripts" / "launch.sh", game / "launch.sh")
+        (game / "workshop_helper.py").write_text(
+            f"import os\nopen({str(self.home / 'helper-cwd')!r}, 'w').write(os.getcwd())\n")
+        (game / "run.sh").write_text(f'#!/bin/sh\npwd > "{self.home / "game-cwd"}"\n')
+        (game / "run.sh").chmod(0o755)
+
+    def tearDown(self):
+        shutil.rmtree(self.home)
+
+    def test_helper_and_game_start_from_the_game_folder(self):
+        subprocess.run(["/bin/zsh", str(self.home / "game" / "launch.sh")], cwd="/", timeout=30,
+                       env=dict(os.environ, RECLAIMER_HOME=str(self.home)))
+        for _ in range(50):
+            if (self.home / "helper-cwd").exists():
+                break
+            time.sleep(0.1)
+        self.assertEqual((self.home / "game-cwd").read_text().strip(), str(self.home / "game"))
+        self.assertEqual((self.home / "helper-cwd").read_text(), str(self.home / "game"))
 
 
 if __name__ == "__main__":
