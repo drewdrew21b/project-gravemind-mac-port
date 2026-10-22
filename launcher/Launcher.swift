@@ -121,6 +121,7 @@ final class Launcher: ObservableObject {
     private var didStart = false
 
     var steamReady: Bool { if case .done = steam { return true }; if case .warning = steam { return true }; return false }
+    var steamSignedIn: Bool { if case .done = steam { return true }; return false }
     var ready: Bool { update.finished && !playing }
 
     var logging = true
@@ -172,6 +173,7 @@ final class Launcher: ObservableObject {
                 playing = true
                 playedAt = .distantPast
                 update = .done("Checked when the game started")
+                checkSteam()
             } else {
                 checkDevTools { [self] state in
                     guard state == .license else {
@@ -301,11 +303,13 @@ final class Launcher: ObservableObject {
             if relaunchRequested { return relaunch() }
             if !update.finished { update = .warning("Couldn't check for updates. You can still play.") }
             checkControllers()
+            checkSteam()
         })
         if updater == nil {
             updateEnded()
             update = .warning("Couldn't check for updates. You can still play.")
             checkControllers()
+            checkSteam()
         }
     }
 

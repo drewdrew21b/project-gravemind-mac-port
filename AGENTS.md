@@ -23,6 +23,19 @@ Pointers for contributors and coding agents. The README is for players; this fil
 - Merge `main` and re-run the checks before asking for review: `main` moves, and a green run from before the move proves nothing about the merge. Merge, don't rebuild: never re-pin `LAUNCHER_SHA`, commit `launcher/ProjectReclaimer` or change `VERSION` to make the checks pass.
 - Tickets that touch the same files do not run in parallel, whatever the dependency graph says: independent in the plan, conflicting on disk.
 
+## Gravemind notes
+
+- This is the public `drewdrew21b/project-gravemind-mac-port` fork; `origin` is this repo and `upstream` is Matt Romano's Reclaimer Mac port. Preserve the README credit to the original project.
+- `VERSION` is the Mac-port version (currently 0.8.0), separate from Gravemind's version (for example, 0.18.380). The updater compares versions numerically, so an existing 1.4.7 Reclaimer install will not auto-downgrade to 0.8.0.
+- Gravemind is the closed-source Windows `h2gravemind.exe` from `BriRoz1/h2gravemind-releases`; its release ZIP contains the executable. Do not assume Reclaimer executable names, CLI options, logs, mod behavior, or loopback requirements apply.
+- MCC depots: shared files `976731`, Halo 2 campaign `976735`, multiplayer `976736` and `976737`. Verify multiplayer at `halo2/h2_maps_win64_dx11/ascension.map`; `976734` is not Halo 2 multiplayer.
+- Steam QR sign-in and downloads use DepotDownloader; the Steam desktop client is not installed in Wine. The launcher has a manual Workshop-link download control. The background `workshop_helper.py` watcher still recognizes legacy Reclaimer log patterns, so `ready` means downloaded, not necessarily loaded by Gravemind.
+- Workshop remains unresolved. On 2026-10-22, Steam login succeeded, Workshop item `3541781365` reached `ready`, and the `appworkshop_976730.acf` manifest existed. Gravemind nevertheless logged `MCC's steam_api64.dll not found, no Workshop downloads` and `0 Halo 2 mod(s)`. The DLL exists at `MCC/Binaries/Win64/steam_api64.dll`; a Wine `+file` trace showed `bink2w64.dll` opened there but no `steam_api64.dll` lookup. Do not install Steam in Wine or copy the DLL without confirmation from the Gravemind maintainers. Revisit the README Workshop caveat when this is resolved.
+- Menu performance is unresolved: gameplay was reported at 60 FPS while main and pause menus fell below 10 FPS at low and high settings. The user reports Linux/Wine users see similar behavior; treat this as a Gravemind/Wine compatibility issue, not a proven Mac-only issue.
+- Reclaimer's deleted loopback LaunchDaemon assigned extra `127.x` aliases for Reclaimer-specific binds. Do not restore it for Gravemind without evidence from Gravemind logs or maintainers.
+- Logs: the source `scripts/launch.sh` captures Wine output in `~/Games/ProjectGravemind/logs/client-wine.log`; the repo scripts support `GRAVEMIND_DEBUG=1` for Wine/DXVK logs. Verify which wrapper is running: the installed `game/launch.sh` was stale and hardcoded the normal log. For file tracing, use the repo wrapper with `RECLAIMER_HOME` set to the install and explicit `WINEDEBUG=+timestamp,+pid,+tid,+file,err+all,+seh,+winsock,+winhttp,+wininet`; reproduce once because file logs grow quickly. Gravemind's own logs are in the Wine user's `AppData/Local/Project Gravemind/logs/`; **Tools > Make Report** includes recent logs and redacts account names and the Mac home path.
+- `.github/workflows/checks.yml` runs tests on standard `macos-15` for pushes to `main`, pull requests, and manual dispatch. Standard hosted-runner minutes are free for this public repo; runner queue time is separate from job runtime.
+
 ## Traps
 
 - The helper scripts run as `/usr/bin/python3 -I`: their own folder isn't on `sys.path`, so importing a sibling script needs `sys.path.insert(0, <its folder>)` (see `presets.py`).

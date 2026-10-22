@@ -273,6 +273,7 @@ struct ContentView: View {
                         .padding(.leading, 34)
                 }
                 Divider()
+                StepRow(title: "Steam (for Workshop mods)", step: m.steam)
                 if let controllers = m.controllers {
                     Divider()
                     StepRow(title: "Controller", step: controllers)
@@ -284,6 +285,23 @@ struct ContentView: View {
             }
             .padding(16)
             .background(RoundedRectangle(cornerRadius: 14).fill(.background.secondary))
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Download a mod before joining (optional)")
+                    .font(.caption).foregroundStyle(.secondary)
+                HStack(spacing: 8) {
+                    TextField("Paste a Steam Workshop link", text: $m.link)
+                        .textFieldStyle(.roundedBorder)
+                        .disabled(!m.steamSignedIn)
+                        .onSubmit { m.getMod() }
+                    Button("Download") { m.getMod() }
+                        .buttonStyle(.borderedProminent).tint(accent)
+                        .disabled(!m.steamSignedIn || m.link.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+                if let error = m.linkError {
+                    Text(error).font(.caption).foregroundStyle(.orange)
+                }
+            }
 
             if m.needsLicense {
                 HStack {

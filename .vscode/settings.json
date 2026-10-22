@@ -1,0 +1,7 @@
+{
+  "githubPullRequests.remotes": ["origin"],
+  "githubIssues.queries": [
+    { "label": "My Issues", "query": "default" },
+    { "label": "Open Issues", "query": "state:open repo:drewdrew21b/project-gravemind-mac-port sort:updated-desc" }
+  ]
+}
