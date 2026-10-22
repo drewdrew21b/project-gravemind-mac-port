@@ -53,7 +53,6 @@ APP = Path(os.environ.get("RECLAIMER_APP_PATH")
            or Path(os.environ.get("RECLAIMER_APPS_DIR", HOME / "Applications")) / "Project Reclaimer.app")
 DESKTOP = Path(os.environ.get("RECLAIMER_DESKTOP", HOME / "Desktop"))
 CLIENT_EXE = re.compile(r"^project-reclaimer-v[0-9.]+\.exe$")
-GAME_PROCESS = os.environ.get("RECLAIMER_GAME_PROCESS", r"project-reclaimer-v[0-9.]+\.exe game-client")
 DAEMON = "local.projectreclaimer.loopback"
 DAEMON_PLIST = f"/Library/LaunchDaemons/{DAEMON}.plist"
 INSTALLED_PLIST = Path(os.environ.get("RECLAIMER_TEST_DAEMON_PLIST", DAEMON_PLIST))  # (tests point it elsewhere)
@@ -107,8 +106,15 @@ def admin_script(command, prompt):
         json.dumps(command, ensure_ascii=False), json.dumps(prompt, ensure_ascii=False))
 
 
+# game_process.py from this install: the one rule for which running processes are this installation's game.
+# (game_process.py owns that rule and says why it is loaded by exact path.)
+_spec = importlib.util.spec_from_file_location("game_process", Path(__file__).resolve().parent / "game_process.py")
+game_process = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(game_process)
+
+
 def game_running():
-    return subprocess.run(["pgrep", "-a", "-f", GAME_PROCESS], capture_output=True).returncode == 0
+    return game_process.running(BASE)
 
 
 def helper():
@@ -308,7 +314,7 @@ def cache_progress(folder):
 
 def game_elapsed_seconds():
     """How long the game client has been running, or None if it isn't."""
-    pids = subprocess.run(["pgrep", "-f", GAME_PROCESS], capture_output=True, text=True).stdout.split()
+    pids = game_process.pids(BASE)
     if not pids:
         return None
     stamp = subprocess.run(["ps", "-o", "etime=", "-p", pids[0]], capture_output=True, text=True).stdout.strip()
@@ -388,8 +394,13 @@ def startup_state():
 
 
 def force_quit():
-    # the game first, by force: a frozen game often comes with a stuck wineserver, which must not stop this
-    subprocess.run(["pkill", "-9", "-a", "-f", GAME_PROCESS], capture_output=True)
+    # the game first, by force: a frozen game often comes with a stuck wineserver, which must not stop this.
+    # Only this install's game: another checkout's game (or another test run's) is not ours to kill.
+    for pid in game_process.pids(BASE):
+        try:
+            os.kill(int(pid), signal.SIGKILL)
+        except (ProcessLookupError, ValueError):  # (it exited between the match and the kill)
+            pass
     env = dict(os.environ, WINEPREFIX=str(BASE / "prefix-wine"))
     wineserver = BASE / "wine" / "Wine Staging.app" / "Contents" / "Resources" / "wine" / "bin" / "wineserver"
     if wineserver.exists():
