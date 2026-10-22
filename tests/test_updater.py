@@ -10,6 +10,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -27,6 +28,8 @@ printf '\\n\\033[1m==> Wine\\033[0m\\n'
 echo "    ok"
 printf '\\n\\033[1m==> Apps\\033[0m\\n'
 [ -n "$FAIL_INSTALL" ] && { echo "Error: something broke" >&2; exit 1; }
+# a download that never finishes (stands in for a stuck curl): records its pid and the installer's, then waits
+[ -n "$HANG_INSTALL" ] && { sleep 300 & echo "$$ $!" > "$RECLAIMER_HOME/hung-pids"; wait; }
 # like install.sh: install the game through the updater (timeout: a deadlock fails the test instead of hanging it)
 [ -n "$NESTED_UPDATER" ] && { "$PYTHON" -c 'import subprocess, sys; sys.exit(subprocess.run(sys.argv[1:], timeout=10).returncode)' \\
   "$PYTHON" -I "$NESTED_UPDATER" game || exit 1; }
@@ -175,6 +178,31 @@ class UpdaterTest(unittest.TestCase):
         self.assertEqual(p.returncode, 0, err)
         self.assertNotIn("Traceback", err)
         self.assertEqual((self.home / "version").read_text().strip(), "1.2.0")
+
+    def test_stopping_a_port_update_stops_the_installer_and_its_downloads(self):
+        # the window's watchdog stops a stuck update by stopping the updater; the installer and its curl used to keep
+        # running and writing into the install after the window said it had stopped (#30)
+        (self.raw / "VERSION").write_text("1.2.0\n")
+        p = subprocess.Popen([sys.executable, "-I", str(UPDATER), "run"], env=dict(self.env, HANG_INSTALL="1"),
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        pids_file = self.home / "hung-pids"
+        for _ in range(200):
+            if pids_file.exists() and len(pids_file.read_text().split()) == 2:
+                break
+            time.sleep(0.05)
+        installer, download = (int(x) for x in pids_file.read_text().split())
+        p.terminate()  # what LineProcess.stop() does
+        p.wait(timeout=10)
+        for pid in (installer, download):
+            for _ in range(100):
+                try:
+                    os.kill(pid, 0)
+                except ProcessLookupError:
+                    break
+                time.sleep(0.05)
+            else:
+                os.kill(pid, 9)
+                self.fail(f"process {pid} kept running after the update was stopped")
 
     def test_after_a_port_update_the_new_installer_owns_the_game_update(self):
         # the new install.sh updates the game with the new updater.py; this (old) process must not try again with

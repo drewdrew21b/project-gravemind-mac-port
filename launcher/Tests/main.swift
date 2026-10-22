@@ -370,6 +370,12 @@ check(sStopping?.actions.isEmpty == true, "a stop in flight offers no actions: \
 check(sStopping?.look == .working, "a stop in flight is working, not a warning")
 check(sStopping?.title == "Stopping the game", "a stop in flight says what it is doing: \(sStopping?.title ?? "-")")
 check(mayStop(stopping: false) && !mayStop(stopping: true), "a second stop cannot start over a stop in flight")
+// the update watchdog counts from when the update started, not from when the window opened (#30): an update that
+// started after the license step, or late in a session, used to get less than its ten minutes, or none
+let updateT0 = Date(timeIntervalSince1970: 1_000_000)
+check(!updateOverdue(startedAt: updateT0, now: updateT0.addingTimeInterval(599)), "an update gets its full ten minutes")
+check(updateOverdue(startedAt: updateT0, now: updateT0.addingTimeInterval(601)), "a stuck update is stopped after ten minutes")
+check(!updateOverdue(startedAt: nil, now: updateT0), "no update, nothing to stop")
 check(mayWatchForGameGone(playing: true, stopping: false), "a running game is watched")
 check(!mayWatchForGameGone(playing: true, stopping: true),
       "while stopping, the game going away is expected: never judged gone")

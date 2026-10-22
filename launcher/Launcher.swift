@@ -93,6 +93,9 @@ final class Launcher: ObservableObject {
     private let started = Date()
     private var running: [LineProcess] = []
     private var updater: LineProcess?
+    private var updateStartedAt: Date?
+    // (keeps the Mac awake and out of App Nap while an update runs: the watchdog's timer once went 95 minutes unfired)
+    private var updateActivity: NSObjectProtocol?
     private var qrProcess: LineProcess?
     private var game: LineProcess?
     private var playedAt = Date.distantPast
@@ -281,10 +284,19 @@ final class Launcher: ObservableObject {
     private func keep(_ p: LineProcess?) { if let p { running.append(p) } }
 
     // 1. updates
+    private func updateEnded() {
+        updateStartedAt = nil
+        if let a = updateActivity { ProcessInfo.processInfo.endActivity(a) }
+        updateActivity = nil
+    }
+
     private func runUpdate() {
         // right after restarting for a Mac port update, only the game is checked: never restart twice in a row
         let relaunched = CommandLine.arguments.contains("--relaunched")
         update = .working("Checking for updates…")
+        updateStartedAt = Date()
+        updateActivity = ProcessInfo.processInfo.beginActivity(options: .userInitiated,
+                                                               reason: "Updating Project Reclaimer")
         updater = python("updater.py", [relaunched ? "game" : "run"], onLine: { [self] line in
             switch UpdaterEvent(line: line) {
             case .status(let s): update = .working(s); updateProgress = nil
@@ -303,6 +315,7 @@ final class Launcher: ObservableObject {
             }
         }, onExit: { [self] _ in
             updater = nil
+            updateEnded()
             updateProgress = nil
             if relaunchRequested { return relaunch() }
             if !update.finished { update = .warning("Couldn't check for updates. You can still play.") }
@@ -722,9 +735,10 @@ final class Launcher: ObservableObject {
         if testAutoplay, ready { testAutoplay = false; play() }
         if testSwitch, let j = joinTrouble, j.serverVersion != nil, !j.asking { testSwitch = false; switchAndRejoin() }
         // a stuck update (it has its own network timeouts, so this is a last resort) never keeps Play off for good
-        if let u = updater, Date().timeIntervalSince(started) > 600 {
-            u.stop()
+        if let u = updater, updateOverdue(startedAt: updateStartedAt, now: Date()) {
+            u.stop()  // (the updater stops the installer and its downloads with it)
             updater = nil
+            updateEnded()
             update = .warning("The update took too long and was stopped. You can still play.")
             checkSteam()
         }

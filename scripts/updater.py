@@ -22,6 +22,7 @@ import json
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -131,8 +132,18 @@ def update_port():
         env = dict(os.environ, RECLAIMER_HOME=str(BASE), RECLAIMER_REPO_RAW=raw, RECLAIMER_UPDATE="1",
                    RECLAIMER_EXPECT_VERSION=latest,
                    RECLAIMER_UPDATE_LOCKED="1")  # install.sh runs `updater.py game` under this run's lock
+        # (in its own process group, so stopping this update stops the installer and its downloads too: the window's
+        # watchdog stops only this process, and they used to keep writing into the install afterwards)
         p = subprocess.Popen(["/bin/bash", str(script)], env=env, stdin=subprocess.DEVNULL,
-                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, start_new_session=True)
+
+        def stop_installer(signum, _frame):
+            try:
+                os.killpg(p.pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+            sys.exit(128 + signum)
+        signal.signal(signal.SIGTERM, stop_installer)
         tail = []
         steps = 0
         for line in p.stdout:
@@ -142,6 +153,7 @@ def update_port():
                 steps += 1
                 say(f"progress: {min(95, steps * 7)}")  # the installer has ~13 steps
         p.wait()
+        signal.signal(signal.SIGTERM, signal.SIG_DFL)
     if p.returncode != 0:
         err = next((l for l in reversed(tail) if l.strip()), "installer failed")
         raise RuntimeError(re.sub(r"^Error: ", "", err.strip()))

@@ -564,6 +564,13 @@ func mayStop(stopping: Bool) -> Bool { !stopping }
 /// second stop, and `gameEnded(false)` would quit the app right after the relaunch.
 func mayWatchForGameGone(playing: Bool, stopping: Bool) -> Bool { playing && !stopping }
 
+/// The update watchdog: an update still running ten minutes after it started is stopped (it has its own network
+/// timeouts, so this is a last resort). Counted from the update's start, not the window's (#30).
+func updateOverdue(startedAt: Date?, now: Date, limit: TimeInterval = 600) -> Bool {
+    guard let startedAt else { return false }
+    return now.timeIntervalSince(startedAt) > limit
+}
+
 /// Try Again's first step is stopping this attempt, so `tools.py force-quit`'s answer decides whether a second start
 /// may happen. Starting over a game that wouldn't stop would put two on one install.
 enum TryAgainStep: Equatable {
