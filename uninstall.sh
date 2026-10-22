@@ -1,13 +1,12 @@
 #!/bin/bash
-# Remove Project Reclaimer Mac Port: apps, ~/Games/ProjectReclaimer (game files, Wine, mods) and the network startup task.
+# Remove Project Gravemind Mac Port: apps and ~/Games/ProjectGravemind (game files and Wine).
 #   RECLAIMER_YES=1           don't ask for confirmation
-#   RECLAIMER_KEEP_NETWORK=1  leave the local-address startup task installed
 set -euo pipefail
-BASE=${RECLAIMER_HOME:-$HOME/Games/ProjectReclaimer}
+BASE=${RECLAIMER_HOME:-$HOME/Games/ProjectGravemind}
 APPS=${RECLAIMER_APPS_DIR:-$HOME/Applications}
 
-echo "This deletes $BASE (including the ~35 GB of game files and downloaded mods)"
-echo "and the Project Reclaimer apps in $APPS."
+echo "This deletes $BASE (including Halo 2's game files)"
+echo "and Project Gravemind.app in $APPS."
 if [ -z "${RECLAIMER_YES:-}" ]; then
   read -r -p "Continue? [y/N] " a </dev/tty
   [[ "$a" =~ ^[Yy] ]] || exit 0
@@ -15,20 +14,17 @@ fi
 
 # rm -rf below: only a folder that is an install (RECLAIMER_HOME=~ must never delete the home folder)
 if [ "$BASE" = / ] || [ "$BASE" = "$HOME" ] || { [ ! -d "$BASE/game" ] && [ ! -d "$BASE/prefix-wine" ]; }; then
-  echo "$BASE doesn't look like a Project Reclaimer install, so nothing was removed." >&2
+  echo "$BASE doesn't look like a Project Gravemind install, so nothing was removed." >&2
   exit 1
 fi
-pkill -f 'project-reclaimer-v[0-9.]+\.exe' 2>/dev/null || true
-pkill -f "$BASE/game/workshop_helper.py" 2>/dev/null || true
-pkill -f "$APPS/Project Reclaimer.app/Contents/MacOS/ProjectReclaimer" 2>/dev/null || true
-# (the Metal app came from older versions of the installer)
-rm -rf "$APPS/Project Reclaimer.app" "$APPS/Project Reclaimer Metal.app" "$BASE"
-
-if [ -z "${RECLAIMER_KEEP_NETWORK:-}" ] && [ -f /Library/LaunchDaemons/local.projectreclaimer.loopback.plist ]; then
-  echo "Removing the network startup task (needs your Mac password)..."
-  sudo /bin/sh -c 'launchctl bootout system/local.projectreclaimer.loopback 2>/dev/null;
-    rm -f /Library/LaunchDaemons/local.projectreclaimer.loopback.plist;
-    rm -rf "/Library/Application Support/ProjectReclaimer"' </dev/tty
-  echo "The extra local addresses go away at the next restart."
+if [ -x "$BASE/game/tools.py" ]; then
+  result=$(RECLAIMER_HOME="$BASE" /usr/bin/python3 -I "$BASE/game/tools.py" force-quit)
+  if [ "$result" != "ok" ]; then
+    echo "The game could not be stopped. Close it and try again." >&2
+    exit 1
+  fi
 fi
+pkill -f "$BASE/game/workshop_helper.py" 2>/dev/null || true
+pkill -f "$APPS/Project Gravemind.app/Contents/MacOS/ProjectReclaimer" 2>/dev/null || true
+rm -rf "$APPS/Project Gravemind.app" "$BASE"
 echo "Done."

@@ -1,4 +1,4 @@
-// The launcher window's state: updates, Steam sign-in, mods, Play, and what happens around the game.
+// The launcher window's state: updates, Play, and what happens around the game.
 import AppKit
 import SwiftUI
 import UserNotifications
@@ -56,7 +56,6 @@ final class Launcher: ObservableObject {
     @Published var link = ""
     @Published var linkError: String?
     @Published var helpOpen = false
-    @Published var network: Step? { didSet { if network != oldValue, let n = network { log("network: \(n)") } } }
     @Published var controllers: Step? { didSet { if controllers != oldValue, let c = controllers { log("controllers: \(c)") } } }
     /// Where the Mac's sound goes: the game keeps that output once it starts, so it is shown (and warned about) before Play.
     // (logged without device names, which go into reports people send: "Chris AirPods Pro")
@@ -68,8 +67,8 @@ final class Launcher: ObservableObject {
     @Published var showTools = false
     @Published var needsLicense = false  // Xcode's license isn't accepted: no helper script can run until it is
     @Published var acceptingLicense = false
-    /// Halo 3 was removed in Tools: Play turns into Install Halo 3, which opens the game checklist.
-    @Published var halo3Missing = !FileManager.default.fileExists(atPath: mccFolder.appendingPathComponent("halo3/halo3.dll").path)
+    /// Halo 2 was removed in Tools: Play turns into Install Halo 2.
+    @Published var halo2Missing = !halo2FilesPresent(in: mccFolder)
     @Published var showInstallGames = false
     @Published var showController = false
     /// An older Project Reclaimer the player chose for servers that haven't updated (nil: the newest).
@@ -93,6 +92,8 @@ final class Launcher: ObservableObject {
     private let started = Date()
     private var running: [LineProcess] = []
     private var updater: LineProcess?
+    private var updateStartedAt: Date?
+    private var updateActivity: NSObjectProtocol?
     private var qrProcess: LineProcess?
     private var game: LineProcess?
     private var playedAt = Date.distantPast
@@ -119,7 +120,7 @@ final class Launcher: ObservableObject {
     private var didStart = false
 
     var steamReady: Bool { if case .done = steam { return true }; if case .warning = steam { return true }; return false }
-    var ready: Bool { update.finished && steamReady && !playing && network?.finished != false }
+    var ready: Bool { update.finished && !playing }
 
     var logging = true
 
@@ -159,29 +160,27 @@ final class Launcher: ObservableObject {
         guard !didStart else { return }
         didStart = true
         tools.onGames = { [weak self] games in
-            if let h = games.first(where: { $0.id == "halo3" }) { self?.halo3Missing = !h.installed }
+            if let h = games.first(where: { $0.id == "halo2" }) { self?.halo2Missing = !h.installed }
         }
         log("started (home \(home.path))")
         timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { _ in
             MainActor.assumeIsolated { self.tick() }
         }
         processRunning(gameProcess) { [self] running in
-            if running {  // opened again while playing: just show mod downloads
+            if running {
                 playing = true
                 playedAt = .distantPast
                 update = .done("Checked when the game started")
-                steam = .done("Steam connected")
             } else {
                 checkDevTools { [self] state in
                     guard state == .license else {
-                        runUpdate()  // (then the network check and Steam: never alongside an update's own network step)
+                        runUpdate()
                         checkSound()
-                        checkMachine()
                         return
                     }
                     needsLicense = true
                     update = .warning("Xcode's license hasn't been accepted (an Xcode update asks again), so Project "
-                                      + "Reclaimer can't check for updates or download mods. Press Accept below: "
+                                    + "Gravemind can't check for updates. Press Accept below: "
                                       + "macOS asks for your password.")
                 }
             }
@@ -198,7 +197,6 @@ final class Launcher: ObservableObject {
             needsLicense = false
             runUpdate()
             checkSound()
-            checkMachine()
         }
     }
 
@@ -225,21 +223,6 @@ final class Launcher: ObservableObject {
 
     private func updateMemoryNotice() {
         memoryNotice = startupExpectation(tier: fitAnswer, cacheBuilt: cacheBuilt)
-    }
-
-    /// The local network addresses Reclaimer needs (added by a startup task) can go missing, e.g. right after a restart
-    /// or a macOS update; without them every server refuses the join. Fix them before Play, with one password box.
-    func checkNetwork() {
-        keep(python("tools.py", ["net-check"], onLine: { [self] line in
-            guard line == "missing" else { return }
-            network = .working("Fixing the network setup. macOS will ask for your Mac password.")
-            keep(python("tools.py", ["net-fix"], onLine: { [self] result in
-                if result == "ok" { network = .done("Fixed") }
-                else if result.hasPrefix("error: ") { network = .warning(String(result.dropFirst(7))) }
-            }, onExit: { [self] _ in
-                if network?.finished == false { network = .warning("The network setup couldn't be fixed. Servers may refuse to let you join.") }
-            }))
-        }, onExit: { _ in }))
     }
 
     /// macOS's game controller service sometimes gets stuck for good: Bluetooth shows the controller connected, but
@@ -281,10 +264,19 @@ final class Launcher: ObservableObject {
     private func keep(_ p: LineProcess?) { if let p { running.append(p) } }
 
     // 1. updates
+    private func updateEnded() {
+        updateStartedAt = nil
+        if let activity = updateActivity { ProcessInfo.processInfo.endActivity(activity) }
+        updateActivity = nil
+    }
+
     private func runUpdate() {
         // right after restarting for a Mac port update, only the game is checked: never restart twice in a row
         let relaunched = CommandLine.arguments.contains("--relaunched")
         update = .working("Checking for updates…")
+        updateStartedAt = Date()
+        updateActivity = ProcessInfo.processInfo.beginActivity(options: .userInitiated,
+                                                               reason: "Updating Project Gravemind")
         updater = python("updater.py", [relaunched ? "game" : "run"], onLine: { [self] line in
             switch UpdaterEvent(line: line) {
             case .status(let s): update = .working(s); updateProgress = nil
@@ -303,17 +295,16 @@ final class Launcher: ObservableObject {
             }
         }, onExit: { [self] _ in
             updater = nil
+            updateEnded()
             updateProgress = nil
             if relaunchRequested { return relaunch() }
             if !update.finished { update = .warning("Couldn't check for updates. You can still play.") }
-            checkNetwork()
             checkControllers()
-            checkSteam()
         })
         if updater == nil {
+            updateEnded()
             update = .warning("Couldn't check for updates. You can still play.")
-            checkNetwork()
-            checkSteam()
+            checkControllers()
         }
     }
 
@@ -720,9 +711,10 @@ final class Launcher: ObservableObject {
         if testAutoplay, ready { testAutoplay = false; play() }
         if testSwitch, let j = joinTrouble, j.serverVersion != nil, !j.asking { testSwitch = false; switchAndRejoin() }
         // a stuck update (it has its own network timeouts, so this is a last resort) never keeps Play off for good
-        if let u = updater, Date().timeIntervalSince(started) > 600 {
+        if let u = updater, updateOverdue(startedAt: updateStartedAt, now: Date()) {
             u.stop()
             updater = nil
+            updateEnded()
             update = .warning("The update took too long and was stopped. You can still play.")
             checkSteam()
         }
@@ -748,7 +740,6 @@ final class Launcher: ObservableObject {
             if !signingIn, !checkingSteam, !steamSkipped { checkSteam() }
         }
         guard ticks % 2 == 0 else { return }
-        if playing { pollStartup() }  // (the command runs off the main thread; nothing is asked while nothing runs)
         processRunning(#"workshop_helper\.py (watch|get)"#) { [self] in helperRunning = $0 }
         // While a stop is in flight the game is meant to be disappearing, so its liveness is not judged here: the
         // windowless and process checks would fire a second stop, and gameEnded() would quit the app right after the

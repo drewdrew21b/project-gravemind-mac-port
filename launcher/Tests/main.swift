@@ -105,10 +105,23 @@ check(launchMode(home: h, isInstalledApp: false, installedAppExists: false) == .
 try? fm.createDirectory(at: h.appendingPathComponent("game"), withIntermediateDirectories: true)
 try? fm.createDirectory(at: h.appendingPathComponent("wine"), withIntermediateDirectories: true)
 check(launchMode(home: h, isInstalledApp: false, installedAppExists: false) == .setup,
-      "first install stopped before Halo 3 downloaded: Setup again, not Upgrade")
-let mcc = h.appendingPathComponent("prefix-wine/drive_c/Program Files (x86)/Steam/steamapps/common/Halo The Master Chief Collection/halo3")
-try? fm.createDirectory(at: mcc, withIntermediateDirectories: true)
-fm.createFile(atPath: mcc.appendingPathComponent("halo3.dll").path, contents: Data())
+      "first install stopped before Halo 2 downloaded: Setup again, not Upgrade")
+let paks = h.appendingPathComponent("prefix-wine/drive_c/Program Files (x86)/Steam/steamapps/common/Halo The Master Chief Collection/halo2/preload/paks")
+try? fm.createDirectory(at: paks, withIntermediateDirectories: true)
+fm.createFile(atPath: paks.appendingPathComponent("campaign.pck").path, contents: Data())
+check(launchMode(home: h, isInstalledApp: true, installedAppExists: true) == .setup,
+      "campaign-only install still needs Halo 2 multiplayer")
+let mccFolder = paks.deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+check(halo2RequiredFreeGB(in: mccFolder) == 34, "campaign-only install needs space for multiplayer")
+let maps = paks.deletingLastPathComponent().deletingLastPathComponent()
+      .appendingPathComponent("h2_maps_win64_dx11")
+try? fm.createDirectory(at: maps, withIntermediateDirectories: true)
+fm.createFile(atPath: maps.appendingPathComponent("ascension.map").path, contents: Data())
+check(halo2RequiredFreeGB(in: mccFolder) == 82, "fresh install needs campaign, multiplayer, and MCC")
+try? fm.removeItem(at: paks)
+check(halo2RequiredFreeGB(in: mccFolder) == 36, "multiplayer-only install needs space for campaign")
+try? fm.createDirectory(at: paks, withIntermediateDirectories: true)
+fm.createFile(atPath: paks.appendingPathComponent("campaign.pck").path, contents: Data())
 fm.createFile(atPath: h.appendingPathComponent(".setup-incomplete").path, contents: Data())
 check(launchMode(home: h, isInstalledApp: false, installedAppExists: false) == .setup,
       "first install stopped after the download (marker left): Setup again")
@@ -129,8 +142,8 @@ check(SetupEvent(line: "error: Couldn't reach Steam.") == .error("Couldn't reach
 check(SetupEvent(line: "qr-begin") == .steam(.qrBegin), "qr")
 check(SetupEvent(line: "status: Signed in to Steam.") == .status("Signed in to Steam."), "status")
 check(SetupEvent(line: "    ok") == .other, "other")
-check(friendlyStep("Halo 3 game files (your Steam copy)") == "Downloading Halo 3 from your Steam account", "friendly")
-check(friendlyStep("Project Reclaimer Mac Port") == nil && friendlyStep("Done") == nil, "hidden steps")
+check(friendlyStep("Halo 2 game files (your Steam copy)") == "Downloading Halo 2 from your Steam account", "friendly")
+check(friendlyStep("Project Gravemind Mac Port") == nil && friendlyStep("Done") == nil, "hidden steps")
 check(friendlyStep("Something new") == "Something new", "unknown steps shown as they are")
 
 // time remaining
@@ -374,6 +387,10 @@ check(mayWatchForGameGone(playing: true, stopping: false), "a running game is wa
 check(!mayWatchForGameGone(playing: true, stopping: true),
       "while stopping, the game going away is expected: never judged gone")
 check(!mayWatchForGameGone(playing: false, stopping: false), "nothing is watched when nothing plays")
+let updateT0 = Date(timeIntervalSince1970: 1_000_000)
+check(!updateOverdue(startedAt: updateT0, now: updateT0.addingTimeInterval(599)), "an update gets its full ten minutes")
+check(updateOverdue(startedAt: updateT0, now: updateT0.addingTimeInterval(601)), "a stuck update is stopped after ten minutes")
+check(!updateOverdue(startedAt: nil, now: updateT0), "no active update is not overdue")
 
 // the note before Play is for the first start: once the Forge library exists there is no long build to expect
 let noCacheAnswer = #"{"state": "stopped", "elapsed_s": null, "stall_after_s": 180, "wrote_this_run": false, "forge_cache": {"bytes": 0, "files": 0, "newest_age_s": null}}"#
@@ -415,7 +432,7 @@ for (ramGB, expected) in [(8, Tier.constrained), (16, Tier.standard)] {
     check(isConstrainedMemory(UInt64(ramGB) << 30) == (expected == .constrained),
           "Setup's memory check agrees with fit.py's tier at \(ramGB) GB")
 }
-check(friendlyStep("This Mac") == "Checking this Mac's memory", "installer's This Mac step")
+check(friendlyStep("Launcher app") == "Adding Project Gravemind to Applications", "installer's launcher step")
 
 print(failures == 0 ? "All launcher tests passed" : "\(failures) launcher test(s) failed")
 exit(failures == 0 ? 0 : 1)

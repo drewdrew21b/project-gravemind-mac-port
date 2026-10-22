@@ -1,5 +1,5 @@
-// The Project Reclaimer window. Opened from the disk image it installs everything (or upgrades a 1.0 install);
-// installed, it updates everything, makes sure Steam is signed in for Workshop mods (QR code right in the window),
+// The Project Gravemind window. Opened from the disk image it installs everything;
+// installed, it checks updates, prepares the Windows environment, and starts the game.
 // fixes the network setup, shows mod downloads, starts the game and offers Tools. The work itself is done by
 // install.sh and the scripts in $RECLAIMER_HOME/game (updater.py, workshop_helper.py, tools.py, launch.sh); the
 // window only runs them and shows what they say.
@@ -12,7 +12,7 @@ import UserNotifications
 let home: URL = {
     if let h = ProcessInfo.processInfo.environment["RECLAIMER_HOME"], !h.isEmpty { return URL(fileURLWithPath: h) }
     if let h = Bundle.main.object(forInfoDictionaryKey: "ReclaimerHome") as? String { return URL(fileURLWithPath: h) }
-    return FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Games/ProjectReclaimer")
+    return FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Games/ProjectGravemind")
 }()
 let gameDir = home.appendingPathComponent("game")
 /// The copy in Applications that install.sh built (its Info.plist names the install); the disk image's copy isn't.
@@ -20,7 +20,7 @@ let isInstalledApp = Bundle.main.object(forInfoDictionaryKey: "ReclaimerHome") !
 let installedAppURL: URL = {
     let dir = ProcessInfo.processInfo.environment["RECLAIMER_APPS_DIR"].map { URL(fileURLWithPath: $0) }
         ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Applications")
-    return isInstalledApp ? Bundle.main.bundleURL : dir.appendingPathComponent("Project Reclaimer.app")
+    return isInstalledApp ? Bundle.main.bundleURL : dir.appendingPathComponent("Project Gravemind.app")
 }()
 
 /// Open the installed app (after installing, or when the disk image's copy is opened) and close this one.
@@ -32,8 +32,9 @@ func openInstalledAppAndQuit() {
         DispatchQueue.main.async { NSApp.terminate(nil) }
     }
 }
-let accent = Color(red: 0.40, green: 0.70, blue: 0.30)
-let gameProcess = #"project-reclaimer-v[0-9.]+\.exe game-client"#
+let accent = Color(red: 0.62, green: 0.40, blue: 0.88)
+let gameProcess = NSRegularExpression.escapedPattern(for: gameDir.path)
+    + #"/(?:gravemind|versions/v[0-9.]+)/h2gravemind\.exe"#
 
 // MARK: - running the scripts
 
@@ -49,6 +50,9 @@ final class LineProcess {
         process.arguments = arguments
         var env = ProcessInfo.processInfo.environment
         env["RECLAIMER_HOME"] = home.path
+        if let installer = Bundle.main.url(forResource: "install", withExtension: "sh") {
+            env["RECLAIMER_BUNDLED_INSTALLER"] = installer.path
+        }
         // updates rebuild the app the player opened, wherever it is; never the read-only disk image's copy
         if isInstalledApp { env["RECLAIMER_APP_PATH"] = Bundle.main.bundlePath }
         env["RECLAIMER_LAUNCHER_NOTIFIES"] = "1"  // the helper leaves notifications to this window
@@ -130,7 +134,7 @@ func acceptXcodeLicense(_ done: @escaping @MainActor (Bool) -> Void) {
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
         p.arguments = ["-e", "do shell script \"/usr/bin/xcodebuild -license accept\" with prompt "
-                       + "\"Project Reclaimer needs Xcode's license accepted to run its helper scripts.\" "
+                       + "\"Project Gravemind needs Xcode's license accepted to run its helper scripts.\" "
                        + "with administrator privileges"]
         p.standardOutput = FileHandle.nullDevice
         p.standardError = FileHandle.nullDevice
@@ -167,7 +171,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if case .working(let s) = launcher?.update, s.hasPrefix("Updating the Mac port") {
                 let alert = NSAlert()
                 alert.messageText = "Quit while updating?"
-                alert.informativeText = "The update carries on in the background. Opening Project Reclaimer again waits for it to finish."
+                alert.informativeText = "The update carries on in the background. Opening Project Gravemind again waits for it to finish."
                 alert.addButton(withTitle: "Keep Open")
                 alert.addButton(withTitle: "Quit")
                 return alert.runModal() == .alertSecondButtonReturn ? .terminateNow : .terminateCancel
@@ -175,7 +179,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard setup?.installing == true else { return .terminateNow }
             let alert = NSAlert()
             alert.messageText = "Stop installing?"
-            alert.informativeText = "You can carry on later: open Project Reclaimer again and it picks up where it stopped."
+                alert.informativeText = "You can carry on later: open Project Gravemind again and it picks up where it stopped."
             alert.addButton(withTitle: "Keep Installing")
             alert.addButton(withTitle: "Stop")
             return alert.runModal() == .alertSecondButtonReturn ? .terminateNow : .terminateCancel
@@ -195,7 +199,7 @@ struct LauncherApp: App {
     @StateObject private var setup = SetupModel(upgrading: startMode == .upgrade)
 
     var body: some Scene {
-        Window("Project Reclaimer", id: "main") {
+        Window("Project Gravemind", id: "main") {
             Group {
                 switch startMode {
                 case .setup, .upgrade:
@@ -244,16 +248,16 @@ enum Entry {
 @MainActor
 func renderStates(to dir: URL) {
     _ = NSApplication.shared
-    let icon = home.deletingLastPathComponent().deletingLastPathComponent()
-        .appendingPathComponent("Applications/Project Reclaimer.app/Contents/Resources/AppIcon.icns")
-    if let img = NSImage(contentsOf: icon) { NSApp.applicationIconImage = img }  // outside the app bundle
+    let icon = ProcessInfo.processInfo.environment["RECLAIMER_TEST_ICON"].map { URL(fileURLWithPath: $0) }
+        ?? Bundle.main.url(forResource: "AppIcon", withExtension: "icns")
+    if let icon, let img = NSImage(contentsOf: icon) { NSApp.applicationIconImage = img }
     try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
     let now = Date().timeIntervalSince1970
     let qrRows = (try? String(contentsOfFile: CommandLine.arguments.last ?? "", encoding: .utf8))?
         .split(separator: "\n").compactMap { $0.hasPrefix("qr: ") ? String($0.dropFirst(4)) : nil } ?? []
     let states: [(String, (Launcher) -> Void)] = [
         ("1-checking", { $0.update = .working("Checking for updates…") }),
-        ("2-updating-game", { $0.update = .working("Updating Project Reclaimer to 0.9.12…"); $0.updateProgress = 0.42 }),
+        ("2-updating-game", { $0.update = .working("Updating Project Gravemind to 0.18.374…"); $0.updateProgress = 0.42 }),
         ("3-steam-qr", {
             $0.update = .done("Up to date"); $0.steam = .working("Sign in to Steam so mods download fast")
             $0.signingIn = true; $0.qr = QRGrid(rows: qrRows)
@@ -290,7 +294,7 @@ func renderStates(to dir: URL) {
         ("9-game-closed", {
             $0.update = .done("Up to date"); $0.steam = .done("Signed in as player123")
             $0.gameError = "The game closed right after starting. Press Play to try again. If it keeps happening, "
-                + "send ~/Games/ProjectReclaimer/logs/client-wine.log to whoever set this up for you."
+                + "send ~/Games/ProjectGravemind/logs/client-wine.log to whoever set this up for you."
         }),
         ("10-steam-slow", {
             $0.update = .done("Up to date"); $0.steam = .working("Checking your Steam sign-in…"); $0.steamSlow = true
@@ -298,10 +302,6 @@ func renderStates(to dir: URL) {
         ("11-help", {
             $0.update = .done("Up to date"); $0.steam = .done("Signed in as player123"); $0.playing = true
             $0.helpOpen = true
-        }),
-        ("12-network-fix", {
-            $0.update = .done("Up to date"); $0.steam = .done("Signed in as player123")
-            $0.network = .working("Fixing the network setup. macOS will ask for your Mac password.")
         }),
         ("13-crash", {
             $0.update = .done("Up to date"); $0.steam = .done("Signed in as player123")
@@ -343,22 +343,18 @@ func renderStates(to dir: URL) {
                         Check(id: "tools", title: "Apple's developer tools", ok: true, detail: ""),
                         Check(id: "rosetta", title: "Rosetta (Apple's Intel translator)", ok: nil,
                               detail: "Installed during setup; macOS asks for your password.")]
-            s.offersODST = true
             s.phase = .ready
         }),
         ("20-setup-8gb", false, { s in
             s.checks = [Check(id: "mac", title: "Apple Silicon Mac, macOS 26", ok: true, detail: ""),
-                        Check(id: "memory", title: "Memory: 8 GB", ok: nil,
-                              detail: "Project Reclaimer recommends 16 GB. With 8 GB the game's first start can sit on \"Building Asset Library\" for a long time, and it may not finish. You can still install."),
                         Check(id: "disk", title: "Free disk space: 61 GB", ok: true, detail: ""),
                         Check(id: "tools", title: "Apple's developer tools", ok: true, detail: "")]
-            s.offersODST = true
             s.phase = .ready
         }),
         ("21-setup-blocked", false, { s in
             s.checks = [Check(id: "mac", title: "Apple Silicon Mac, macOS 26", ok: true, detail: ""),
                         Check(id: "disk", title: "Free disk space: 31 GB", ok: false,
-                              detail: "Halo 3 needs about 45 GB. Free up 14 GB (empty the Trash, delete big downloads), then press Check Again."),
+                            detail: "Halo 2 campaign, multiplayer, and MCC shared files need about 82 GB. Free up 51 GB (empty the Trash, delete big downloads), then press Check Again."),
                         Check(id: "tools", title: "Apple's developer tools", ok: false,
                               detail: "A small free Apple component the helper scripts use. Press the button below: macOS asks to install it (click Install, then Agree). It takes about 5 minutes.")]
             s.needsDevTools = true
@@ -372,29 +368,29 @@ func renderStates(to dir: URL) {
             s.phase = .blocked
         }),
         ("22-setup-qr", false, { s in
-            s.steps = ["Getting the Windows compatibility layer", "Getting the menu graphics library",
-                       "Setting up the helper scripts", "Downloading Project Reclaimer",
+            s.steps = ["Getting the Windows compatibility layer", "Setting up game scripts",
+                       "Downloading Project Gravemind",
                        "Preparing the Windows environment", "Getting the Steam downloader",
-                       "Downloading Halo 3 from your Steam account"]
+                       "Downloading Halo 2 from your Steam account"]
             s.qr = QRGrid(rows: qrRows)
             s.phase = .installing
         }),
         ("23-setup-download", false, { s in
-            s.steps = ["Getting the Windows compatibility layer", "Getting the menu graphics library",
-                       "Setting up the helper scripts", "Downloading Project Reclaimer",
+            s.steps = ["Getting the Windows compatibility layer", "Setting up game scripts",
+                       "Downloading Project Gravemind",
                        "Preparing the Windows environment", "Getting the Steam downloader",
-                       "Downloading Halo 3 from your Steam account"]
+                       "Downloading Halo 2 from your Steam account"]
             s.progress = 0.37
             s.remaining = "About 14 minutes left"
             s.phase = .installing
         }),
         ("24-setup-failed", false, { s in
-            s.steps = ["Getting the Windows compatibility layer", "Downloading Halo 3 from your Steam account"]
+            s.steps = ["Getting the Windows compatibility layer", "Downloading Halo 2 from your Steam account"]
             s.phase = .failed("This Steam account doesn't own Halo: The Master Chief Collection.")
         }),
         ("25-setup-done", false, { s in
-            s.steps = ["Getting the Windows compatibility layer", "Downloading Halo 3 from your Steam account",
-                       "Setting up the network (asks for your Mac password)", "Adding Project Reclaimer to Applications"]
+            s.steps = ["Getting the Windows compatibility layer", "Downloading Halo 2 from your Steam account",
+                       "Adding Project Gravemind to Applications"]
             s.phase = .done
         }),
         ("26-upgrade", true, { s in
@@ -416,33 +412,33 @@ func renderStates(to dir: URL) {
     m.tools.mods = [ModItem(id: "1", title: "Ultimate Forge 2.0", bytes: 8_900_000_000),
                     ModItem(id: "2", title: "Warlock", bytes: 1_600_000_000),
                     ModItem(id: "3", title: "Halo 3 Foundation", bytes: 337_000_000)]
-    m.tools.say("The report is on your Desktop: Project Reclaimer report 2026-10-10 12.31.zip")
-    let h3 = GameItem(id: "halo3", title: "Halo 3", installed: true, bytes: 13_100_000_000, path: "/Users/player/Games/ProjectReclaimer/prefix-wine/drive_c/Program Files (x86)/Steam/steamapps/common/Halo The Master Chief Collection/halo3")
-    let odst = GameItem(id: "odst", title: "Halo 3: ODST", installed: true, bytes: 8_700_000_000, path: "/Users/player/Games/ProjectReclaimer/prefix-wine/drive_c/Program Files (x86)/Steam/steamapps/common/Halo The Master Chief Collection/halo3odst")
-    m.tools.games = [h3, odst]
-    m.tools.mccBytes = 39_600_000_000
+    m.tools.say("The report is on your Desktop: Project Gravemind report 2026-10-21 12.31.zip")
+    let halo2Path = "/Users/player/Games/ProjectGravemind/prefix-wine/drive_c/Program Files (x86)/Steam/steamapps/common/Halo The Master Chief Collection/halo2"
+    let halo2 = GameItem(id: "halo2", title: "Halo 2", installed: true, bytes: 60_800_000_000, path: halo2Path)
+    m.tools.games = [halo2]
+    m.tools.mccBytes = 78_000_000_000
     snapshot(ToolsSheet(launcher: m, t: m.tools), name: "30-tools", to: dir)
-    m.tools.games = [h3, GameItem(id: "odst", title: "Halo 3: ODST", installed: false, bytes: 0, path: odst.path)]
+    m.tools.games = [GameItem(id: "halo2", title: "Halo 2", installed: false, bytes: 0, path: halo2Path)]
     m.tools.result = nil
-    snapshot(ToolsSheet(launcher: m, t: m.tools), name: "30-tools-no-odst", to: dir)
+    snapshot(ToolsSheet(launcher: m, t: m.tools), name: "30-tools-no-halo2", to: dir)
 
-    // Halo 3 removed in Tools (ODST kept): Tools, the main window's Install Halo 3, and its game checklist
+    // Halo 2 removed in Tools: the main window's Install Halo 2 action.
     let r = Launcher()
     r.logging = false
     r.update = .done("Up to date"); r.steam = .done("Signed in as player123")
-    r.halo3Missing = true
+    r.halo2Missing = true
     r.tools.freeBytes = 54_000_000_000
-    r.tools.games = [GameItem(id: "halo3", title: "Halo 3", installed: false, bytes: 0, path: h3.path), odst]
-    r.tools.say("Halo 3 was removed. Press Install Halo 3 in the main window to play again.")
-    snapshot(ToolsSheet(launcher: r, t: r.tools), name: "30-tools-no-halo3", to: dir)
+    r.tools.games = [GameItem(id: "halo2", title: "Halo 2", installed: false, bytes: 0, path: halo2Path)]
+    r.tools.say("Halo 2 was removed. Press Install Halo 2 in the main window to play again.")
+    snapshot(ToolsSheet(launcher: r, t: r.tools), name: "30-tools-no-halo2", to: dir)
     r.tools.result = nil
-    snapshot(ContentView(m: r), name: "35-install-halo3", to: dir)
-    snapshot(InstallGamesSheet(m: r, t: r.tools), name: "36-install-halo3-games", to: dir)
+    snapshot(ContentView(m: r), name: "35-install-halo2", to: dir)
+    snapshot(InstallGamesSheet(m: r, t: r.tools), name: "36-install-halo2", to: dir)
 
     // an older version chosen: the main window, and Tools with the version list open
     let v = Launcher()
     v.logging = false
-    v.update = .done("Playing an older Project Reclaimer (0.9.11) for servers that haven't updated yet")
+    v.update = .done("Playing Project Gravemind 0.18.373")
     v.steam = .done("Signed in as player123")
     v.chosenVersion = "0.9.11"
     snapshot(ContentView(m: v), name: "31-older-version", to: dir)
@@ -490,13 +486,13 @@ func snapshot<V: View>(_ view: V, name: String, to dir: URL) {
 struct OpenAnywayGuide: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
-            Text("Opening Project Reclaimer the first time").font(.title2.bold())
+            Text("Opening Project Gravemind the first time").font(.title2.bold())
             Text("macOS blocks apps that aren't from the App Store or a paid Apple developer account, once. This is how to let it open:")
                 .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            step(1, "cursorarrow.click.2", "Double-click **Project Reclaimer**. macOS says it can't verify it: click **Done**.")
+            step(1, "cursorarrow.click.2", "Double-click **Project Gravemind**. macOS says it can't verify it: click **Done**.")
             step(2, "gearshape", "Open **System Settings**, then **Privacy & Security**. Scroll down to Security.")
-            step(3, "lock.open", "Next to “Project Reclaimer was blocked”, click **Open Anyway**. Confirm with **Open Anyway** and your Mac password.")
-            step(4, "checkmark.seal", "That's it. The Project Reclaimer window opens and installs everything; you won't see this again.")
+            step(3, "lock.open", "Next to “Project Gravemind was blocked”, click **Open Anyway**. Confirm with **Open Anyway** and your Mac password.")
+            step(4, "checkmark.seal", "That's it. The Project Gravemind window opens and installs everything; you won't see this again.")
         }
         .padding(28)
         .frame(width: 560)

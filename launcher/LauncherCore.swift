@@ -153,10 +153,34 @@ func modNotifications(before: [ModStatus], after: [ModStatus]) -> [(title: Strin
 
 // MARK: - setup and upgrade
 
+func halo2FilesPresent(in mccFolder: URL, fileManager: FileManager = .default) -> Bool {
+    halo2CampaignPresent(in: mccFolder, fileManager: fileManager)
+        && halo2MultiplayerPresent(in: mccFolder, fileManager: fileManager)
+}
+
+func halo2CampaignPresent(in mccFolder: URL, fileManager: FileManager = .default) -> Bool {
+    let halo2 = mccFolder.appendingPathComponent("halo2")
+    let paks = halo2.appendingPathComponent("preload/paks")
+    return (try? fileManager.contentsOfDirectory(atPath: paks.path))?.contains { $0.hasSuffix(".pck") } ?? false
+}
+
+func halo2MultiplayerPresent(in mccFolder: URL, fileManager: FileManager = .default) -> Bool {
+    let ascension = mccFolder.appendingPathComponent("halo2/h2_maps_win64_dx11/ascension.map")
+    return fileManager.fileExists(atPath: ascension.path)
+}
+
+func halo2RequiredFreeGB(in mccFolder: URL, fileManager: FileManager = .default) -> Double {
+    let campaign = halo2CampaignPresent(in: mccFolder, fileManager: fileManager)
+    let multiplayer = halo2MultiplayerPresent(in: mccFolder, fileManager: fileManager)
+    if campaign && !multiplayer { return 34 }
+    if multiplayer && !campaign { return 36 }
+    return 82
+}
+
 /// What the window opens as.
 enum LaunchMode: Equatable {
     case setup      // nothing installed: install everything
-    case upgrade    // a 1.0 install (no version file): one-time upgrade
+    case upgrade    // an older install (no version file): one-time update
     case handOff    // the DMG copy opened while an up-to-date install exists: open the installed app instead
     case launcher   // the installed app: updates, Steam, Play
 }
@@ -170,9 +194,9 @@ func launchMode(home: URL, isInstalledApp: Bool, installedAppExists: Bool) -> La
         // a 1.0 install has its game files and no version file; a first install that stopped partway (window
         // closed, Mac restarted) left a marker, and carries on as Setup instead of a "one-time upgrade"
         let mcc = "prefix-wine/drive_c/Program Files (x86)/Steam/steamapps/common/Halo The Master Chief Collection"
-        let halo = home.appendingPathComponent(mcc + "/halo3/halo3.dll").path
+        let halo2Folder = home.appendingPathComponent(mcc)
         let incomplete = home.appendingPathComponent(".setup-incomplete").path
-        return fm.fileExists(atPath: halo) && !fm.fileExists(atPath: incomplete) ? .upgrade : .setup
+        return halo2FilesPresent(in: halo2Folder) && !fm.fileExists(atPath: incomplete) ? .upgrade : .setup
     }
     if !isInstalledApp, installedAppExists { return .handOff }
     return .launcher
@@ -196,19 +220,15 @@ enum SetupEvent: Equatable {
 /// install.sh's step headings, said plainly (nil: a step not worth showing on its own).
 func friendlyStep(_ heading: String) -> String? {
     let table: [(String, String?)] = [
-        ("Project Reclaimer Mac Port", nil),
+        ("Project Gravemind Mac Port", nil),
         ("Installing Rosetta", "Installing Rosetta (Apple's Intel translator)"),
         ("Wine", "Getting the Windows compatibility layer"),
-        ("Menu library", "Getting the menu graphics library"),
-        ("Game scripts", "Setting up the helper scripts"),
-        ("Project Reclaimer (latest", "Downloading Project Reclaimer"),
+        ("Game scripts and Steam downloader helper", "Setting up game scripts"),
+        ("Project Gravemind (latest", "Downloading Project Gravemind"),
         ("Windows environment", "Preparing the Windows environment"),
         ("DepotDownloader", "Getting the Steam downloader"),
-        ("Halo 3 game files", "Downloading Halo 3 from your Steam account"),
-        ("Local network addresses", "Setting up the network (asks for your Mac password)"),
-        ("Tuned graphics settings", "Choosing graphics settings for your Mac"),
-        ("This Mac", "Checking this Mac's memory"),
-        ("Launcher app", "Adding Project Reclaimer to Applications"),
+        ("Halo 2 game files", "Downloading Halo 2 from your Steam account"),
+        ("Launcher app", "Adding Project Gravemind to Applications"),
         ("Done", nil), ("Updated to", nil),
     ]
     return table.first { heading.hasPrefix($0.0) }.map { $0.1 } ?? heading
@@ -536,6 +556,11 @@ func mayStop(stopping: Bool) -> Bool { !stopping }
 /// the game is *meant* to be disappearing — Try Again's own force-quit is doing it — so watching for it would fire a
 /// second stop, and `gameEnded(false)` would quit the app right after the relaunch.
 func mayWatchForGameGone(playing: Bool, stopping: Bool) -> Bool { playing && !stopping }
+/// Count the update watchdog from the update's start, not from when the window opened.
+func updateOverdue(startedAt: Date?, now: Date, limit: TimeInterval = 600) -> Bool {
+    guard let startedAt else { return false }
+    return now.timeIntervalSince(startedAt) > limit
+}
 
 /// Try Again's first step is stopping this attempt, so `tools.py force-quit`'s answer decides whether a second start
 /// may happen. Starting over a game that wouldn't stop would put two on one install.

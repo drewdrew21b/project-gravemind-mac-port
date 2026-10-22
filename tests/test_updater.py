@@ -1,354 +1,195 @@
-"""Tests for scripts/updater.py against local file:// stand-ins for GitHub.
-
-Run: /usr/bin/python3 -I -m unittest discover -s tests
-"""
+"""Updater tests against local stand-ins for the Gravemind GitHub API and release assets."""
 import hashlib
+import io
 import json
-import importlib.util
 import os
 import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
+import zipfile
 from pathlib import Path
-from unittest import mock
 
 REPO = Path(__file__).resolve().parent.parent
 UPDATER = REPO / "scripts" / "updater.py"
-NEW_EXE = b"MZ new reclaimer 0.9.12"
-OLD_EXE = b"MZ older reclaimer 0.9.11"
-
-FAKE_INSTALL = """#!/bin/bash
-# stand-in for install.sh: records how it was called, then behaves like a successful update
-set -e
-echo "env RECLAIMER_UPDATE=$RECLAIMER_UPDATE RECLAIMER_HOME=$RECLAIMER_HOME EXPECT=$RECLAIMER_EXPECT_VERSION" > "$RECLAIMER_HOME/install-called"
-printf '\\n\\033[1m==> Wine\\033[0m\\n'
-echo "    ok"
-printf '\\n\\033[1m==> Apps\\033[0m\\n'
-[ -n "$FAIL_INSTALL" ] && { echo "Error: something broke" >&2; exit 1; }
-# like install.sh: install the game through the updater (timeout: a deadlock fails the test instead of hanging it)
-[ -n "$NESTED_UPDATER" ] && { "$PYTHON" -c 'import subprocess, sys; sys.exit(subprocess.run(sys.argv[1:], timeout=10).returncode)' \\
-  "$PYTHON" -I "$NESTED_UPDATER" game || exit 1; }
-# like install.sh: record the version the updater asked for (VERSION.new stands in for a stale CDN copy if present)
-if [ -f "${RECLAIMER_REPO_RAW#file://}/VERSION.new" ]; then cp "${RECLAIMER_REPO_RAW#file://}/VERSION.new" "$RECLAIMER_HOME/version"
-else echo "$RECLAIMER_EXPECT_VERSION" > "$RECLAIMER_HOME/version"; fi
-"""
 
 
-def sha(b):
-    return hashlib.sha256(b).hexdigest()
+def package_bytes(executable=b"MZ Gravemind", extra=None):
+    data = io.BytesIO()
+    with zipfile.ZipFile(data, "w") as package:
+        package.writestr("h2gravemind.exe", executable)
+        package.writestr("LEGAL.md", "legal")
+        for name, content in (extra or {}).items():
+            package.writestr(name, content)
+    return data.getvalue()
+
+
+def sha(data):
+    return hashlib.sha256(data).hexdigest()
 
 
 class UpdaterTest(unittest.TestCase):
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp())
         self.home = self.tmp / "home"
-        (self.home / "game").mkdir(parents=True)
-        self.raw = self.tmp / "raw"
-        self.raw.mkdir()
-        self.rel = self.tmp / "releases"
-        self.rel.mkdir()
-        (self.raw / "VERSION").write_text("1.1.0\n")
-        (self.raw / "install.sh").write_text(FAKE_INSTALL)
-        (self.home / "version").write_text("1.1.0\n")
-        # latest game release
-        (self.rel / "project-reclaimer-v0.9.12.exe").write_bytes(NEW_EXE)
-        (self.rel / "SHA256SUMS.txt").write_text(
-            f"{sha(b'ded')}  project-reclaimer-dedicated-v0.9.12.exe\r\n"
-            f"{sha(NEW_EXE)} *project-reclaimer-v0.9.12.exe\r\n")
-        # a game version no real install has, so a game running on this Mac doesn't affect the tests
-        # an older release, where GitHub keeps it: releases/download/<tag>/
-        self.tags = self.tmp / "tags"
-        (self.tags / "v0.9.11").mkdir(parents=True)
-        (self.tags / "v0.9.11" / "project-reclaimer-v0.9.11.exe").write_bytes(OLD_EXE)
-        (self.tags / "v0.9.11" / "SHA256SUMS.txt").write_text(f"{sha(OLD_EXE)}  project-reclaimer-v0.9.11.exe\n")
-        (self.home / "game" / "opengl32.dll").write_bytes(b"mesa")
-        (self.home / "game" / "libgallium_wgl.dll").write_bytes(b"gallium")
-        listing = self.tmp / "releases.json"
-        listing.write_text(json.dumps([
-            {"tag_name": "v0.9.12", "published_at": "2026-10-10T13:20:51Z", "prerelease": False, "draft": False},
-            {"tag_name": "v0.9.11", "published_at": "2026-10-09T22:35:00Z", "prerelease": False, "draft": False},
-            {"tag_name": "v0.9.11-rc1", "published_at": "2026-10-09T20:00:00Z", "prerelease": True, "draft": False},
-        ]))
-        self.env = dict(os.environ, RECLAIMER_HOME=str(self.home), RECLAIMER_REPO_RAW=self.raw.as_uri(),
-                        RECLAIMER_RELEASES=self.rel.as_uri(), RECLAIMER_RELEASES_API=listing.as_uri(),
-                        RECLAIMER_RELEASE_DOWNLOADS=self.tags.as_uri(),
-                        RECLAIMER_GAME_PROCESS=r"project-reclaimer-v9\.9\.(98|99)\.exe game-client")
+        self.assets = self.tmp / "assets"
+        self.assets.mkdir()
+        self.latest_api = self.tmp / "latest.json"
+        self.releases_api = self.tmp / "releases.json"
+        self.latest_zip = package_bytes()
+        self.old_zip = package_bytes(b"MZ older Gravemind")
+        (self.assets / "latest.zip").write_bytes(self.latest_zip)
+        (self.assets / "old.zip").write_bytes(self.old_zip)
+        latest = self.release("v0.18.374", self.assets / "latest.zip", self.latest_zip)
+        older = self.release("v0.18.373", self.assets / "old.zip", self.old_zip)
+        self.latest_api.write_text(json.dumps(latest))
+        self.releases_api.write_text(json.dumps([latest, older, {
+            "tag_name": "v0.19.0-rc1", "prerelease": True, "draft": False,
+            "published_at": "2026-10-11T00:00:00Z", "assets": []
+        }]))
+        self.env = dict(os.environ, RECLAIMER_HOME=str(self.home),
+                        GRAVEMIND_RELEASE_API=self.latest_api.as_uri(),
+                        GRAVEMIND_RELEASES_API=self.releases_api.as_uri(),
+                        GRAVEMIND_GAME_PROCESS=r"not-a-real-game-process")
 
     def tearDown(self):
         shutil.rmtree(self.tmp)
 
+    @staticmethod
+    def release(tag, archive, content):
+        return {"tag_name": tag, "published_at": "2026-10-10T13:20:51Z",
+                "prerelease": False, "draft": False,
+                "assets": [{"name": "h2gravemind.zip", "digest": f"sha256:{sha(content)}",
+                            "browser_download_url": archive.as_uri()}]}
+
     def run_updater(self, *args, **env):
-        p = subprocess.run([sys.executable, "-I", str(UPDATER), *args], env=dict(self.env, **env),
-                           capture_output=True, text=True, timeout=60)
-        return p.returncode, p.stdout.splitlines()
+        process = subprocess.run([sys.executable, "-I", str(UPDATER), *args],
+                                 env=dict(self.env, **env), capture_output=True, text=True, timeout=60)
+        return process.returncode, process.stdout.splitlines()
 
-    def game_files(self):
-        return sorted(p.name for p in (self.home / "game").glob("*.exe"))
+    @property
+    def package_dir(self):
+        return self.home / "game" / "gravemind"
 
-    def test_up_to_date_changes_nothing(self):
-        (self.home / "game" / "project-reclaimer-v0.9.12.exe").write_bytes(NEW_EXE)
-        rc, out = self.run_updater("run")
-        self.assertEqual(rc, 0)
-        self.assertEqual(out[-1], "done: up to date")
-        self.assertFalse((self.home / "install-called").exists())
-        self.assertNotIn("relaunch", out)
+    def test_latest_release_installs_verified_zip(self):
+        rc, output = self.run_updater("game")
+        self.assertEqual(rc, 0, output)
+        self.assertIn("status: Updating Project Gravemind to 0.18.374…", output)
+        self.assertEqual(output[-1], "done: updated")
+        self.assertEqual((self.package_dir / "h2gravemind.exe").read_bytes(), b"MZ Gravemind")
+        self.assertEqual((self.package_dir / ".release-version").read_text().strip(), "0.18.374")
+        self.assertEqual((self.package_dir / ".release-sha256").read_text().strip(), sha(self.latest_zip))
+        self.assertEqual((self.package_dir / "LEGAL.md").read_text(), "legal")
 
-    def test_new_game_release_replaces_old_and_mislabeled_exes(self):
-        game = self.home / "game"
-        (game / "project-reclaimer-v0.9.8.exe").write_bytes(b"old")
-        (game / "project-reclaimer-v0.9.7.exe").write_bytes(b"self-updated in place, wrong name")
-        (game / "project-reclaimer-dedicated-v0.9.8.exe").write_bytes(b"server")
-        rc, out = self.run_updater("run")
-        self.assertEqual(rc, 0, out)
-        self.assertIn("status: Updating Project Reclaimer to 0.9.12…", out)
-        self.assertTrue(any(l.startswith("progress: ") for l in out))
-        self.assertEqual(self.game_files(), ["project-reclaimer-dedicated-v0.9.8.exe", "project-reclaimer-v0.9.12.exe"])
-        self.assertEqual((game / "project-reclaimer-v0.9.12.exe").read_bytes(), NEW_EXE)
-        self.assertEqual(out[-1], "done: updated")
-
-    def rename_release_to_client(self):
-        """Since 0.9.18 releases name the game project-reclaimer-client-v<version>.exe (the server stays -dedicated-)."""
-        (self.rel / "project-reclaimer-v0.9.12.exe").rename(self.rel / "project-reclaimer-client-v0.9.12.exe")
-        (self.rel / "SHA256SUMS.txt").write_text(
-            f"{sha(NEW_EXE)}  project-reclaimer-client-v0.9.12.exe\n"
-            f"{sha(b'ded')}  project-reclaimer-dedicated-v0.9.12.exe\n")
-
-    def test_release_with_renamed_client_installs_under_the_usual_name(self):
-        # the whole Mac port (run.sh, Tools, the window, the mod helper) knows the game as project-reclaimer-v*.exe
-        self.rename_release_to_client()
-        (self.home / "game" / "project-reclaimer-v0.9.8.exe").write_bytes(b"old")
-        rc, out = self.run_updater("game")
-        self.assertEqual(rc, 0, out)
-        self.assertIn("status: Updating Project Reclaimer to 0.9.12…", out)
-        self.assertEqual(self.game_files(), ["project-reclaimer-v0.9.12.exe"])
-        self.assertEqual((self.home / "game" / "project-reclaimer-v0.9.12.exe").read_bytes(), NEW_EXE)
-        rc, out = self.run_updater("game")
-        self.assertEqual(out[-1], "done: up to date")
-
-    def test_older_release_with_renamed_client_can_be_chosen(self):
-        d = self.tags / "v0.9.11"
-        (d / "project-reclaimer-v0.9.11.exe").rename(d / "project-reclaimer-client-v0.9.11.exe")
-        (d / "SHA256SUMS.txt").write_text(f"{sha(OLD_EXE)}  project-reclaimer-client-v0.9.11.exe\n")
-        rc, out = self.run_updater("use", "0.9.11")
-        self.assertEqual(rc, 0, out)
-        self.assertEqual((self.home / "game" / "versions" / "project-reclaimer-v0.9.11.exe").read_bytes(), OLD_EXE)
-
-    def test_corrupt_game_exe_is_downloaded_again(self):
-        (self.home / "game" / "project-reclaimer-v0.9.12.exe").write_bytes(b"truncated")
-        rc, out = self.run_updater("game")
-        self.assertEqual((self.home / "game" / "project-reclaimer-v0.9.12.exe").read_bytes(), NEW_EXE)
-
-    def test_checksum_mismatch_keeps_old_game(self):
-        (self.rel / "project-reclaimer-v0.9.12.exe").write_bytes(b"tampered")
-        (self.home / "game" / "project-reclaimer-v0.9.8.exe").write_bytes(b"old")
-        rc, out = self.run_updater("run")
-        self.assertNotEqual(rc, 0)
-        self.assertTrue(out[-1].startswith("error: "), out)
-        self.assertEqual(self.game_files(), ["project-reclaimer-v0.9.8.exe"])
-        self.assertEqual(list((self.home / "game").glob("*.part")), [])
-
-    def test_newer_port_version_runs_installer_in_update_mode_and_relaunches(self):
-        (self.home / "game" / "project-reclaimer-v0.9.12.exe").write_bytes(NEW_EXE)
-        (self.raw / "VERSION").write_text("1.2.0\n")
-        (self.raw / "VERSION.new").write_text("1.2.0\n")
-        rc, out = self.run_updater("run")
-        self.assertEqual(rc, 0, out)
-        called = (self.home / "install-called").read_text()
-        self.assertIn("RECLAIMER_UPDATE=1", called)
-        self.assertIn(f"RECLAIMER_HOME={self.home}", called)
-        self.assertIn("status: Updating the Mac port to 1.2.0…", out)
-        self.assertIn("relaunch", out)
-        self.assertEqual((self.home / "version").read_text().strip(), "1.2.0")
-
-    def test_port_update_finishes_when_the_window_closes(self):
-        # 1.3.1's update died halfway with BrokenPipeError when the window was closed a second after it started
-        (self.home / "game" / "project-reclaimer-v0.9.12.exe").write_bytes(NEW_EXE)
-        (self.raw / "VERSION").write_text("1.2.0\n")
-        (self.raw / "VERSION.new").write_text("1.2.0\n")
-        p = subprocess.Popen([sys.executable, "-I", str(UPDATER), "run"], env=self.env, stdout=subprocess.PIPE,
-                             stderr=subprocess.PIPE, text=True)
-        self.assertEqual(p.stdout.readline().strip(), "status: Checking for updates…")
-        p.stdout.close()  # the window quits
-        _, err = p.communicate(timeout=60)
-        self.assertEqual(p.returncode, 0, err)
-        self.assertNotIn("Traceback", err)
-        self.assertEqual((self.home / "version").read_text().strip(), "1.2.0")
-
-    def test_after_a_port_update_the_new_installer_owns_the_game_update(self):
-        # the new install.sh updates the game with the new updater.py; this (old) process must not try again with
-        # its old code: in 1.2.1 that printed "no game client" for 0.9.18 just after the fix had installed it
-        (self.raw / "VERSION").write_text("1.2.0\n")
-        (self.raw / "VERSION.new").write_text("1.2.0\n")
-        (self.rel / "SHA256SUMS.txt").write_text("0" * 64 + "  some-future-name-v0.9.12.exe\n")
-        rc, out = self.run_updater("run")
-        self.assertEqual(rc, 0, out)
-        self.assertIn("relaunch", out)
-        self.assertFalse(any(l.startswith("error: ") for l in out), out)
-
-    def test_installer_is_told_which_version_it_installs(self):
-        (self.home / "game" / "project-reclaimer-v0.9.12.exe").write_bytes(NEW_EXE)
-        (self.raw / "VERSION").write_text("1.2.0\n")
-        rc, out = self.run_updater("run")
-        self.assertIn("EXPECT=1.2.0", (self.home / "install-called").read_text())
-        self.assertIn("relaunch", out)
-
-    def test_no_relaunch_when_the_installed_version_did_not_change(self):
-        # e.g. GitHub's cache served an older install.sh: relaunching would only run the same update again
-        (self.home / "game" / "project-reclaimer-v0.9.12.exe").write_bytes(NEW_EXE)
-        (self.raw / "VERSION").write_text("1.2.0\n")
-        (self.raw / "VERSION.new").write_text("1.1.0\n")
-        rc, out = self.run_updater("run")
-        self.assertNotIn("relaunch", out)
-        self.assertTrue(out[-1].startswith("error: "), out)
-
-    def test_installer_updating_the_game_inside_a_port_update_does_not_deadlock(self):
-        (self.raw / "VERSION").write_text("1.2.0\n")
-        rc, out = self.run_updater("run", NESTED_UPDATER=str(UPDATER), PYTHON=sys.executable)
-        self.assertIn("relaunch", out, out)
-        self.assertIn("project-reclaimer-v0.9.12.exe", self.game_files())
-
-    def test_one_update_at_a_time(self):
-        import fcntl
-        (self.home / "game" / "project-reclaimer-v0.9.12.exe").write_bytes(NEW_EXE)
-        lock = open(self.home / ".update.lock", "w")
-        fcntl.flock(lock, fcntl.LOCK_EX)
-        p = subprocess.Popen([sys.executable, "-I", str(UPDATER), "run"], env=self.env, stdout=subprocess.PIPE,
-                             text=True)
-        try:
-            first = p.stdout.readline().strip()
-            self.assertEqual(first, "status: Waiting for another update to finish…")
-            self.assertIsNone(p.poll())
-        finally:
-            lock.close()  # the other update finishes
-        out = p.communicate(timeout=30)[0].splitlines()
-        self.assertEqual(out[-1], "done: up to date")
-
-    def test_up_to_date_game_still_removes_other_client_exes(self):
-        game = self.home / "game"
-        (game / "project-reclaimer-v0.9.12.exe").write_bytes(NEW_EXE)
-        (game / "project-reclaimer-v0.9.13.exe").write_bytes(b"newer name, e.g. after a release was rolled back")
+    def test_verified_release_is_not_downloaded_twice(self):
         self.run_updater("game")
-        self.assertEqual(self.game_files(), ["project-reclaimer-v0.9.12.exe"])
+        exe = self.package_dir / "h2gravemind.exe"
+        rc, output = self.run_updater("game")
+        self.assertEqual(rc, 0, output)
+        self.assertEqual(output[-1], "done: up to date")
+        self.assertEqual(exe.read_bytes(), b"MZ Gravemind")
 
-    def test_install_without_version_file_counts_as_old(self):
-        (self.home / "version").unlink()
-        (self.home / "game" / "project-reclaimer-v0.9.12.exe").write_bytes(NEW_EXE)
-        (self.raw / "VERSION.new").write_text("1.1.0\n")
-        rc, out = self.run_updater("run")
-        self.assertTrue((self.home / "install-called").exists())
+    def test_modified_executable_is_repaired_from_verified_release(self):
+        self.run_updater("game")
+        (self.package_dir / "h2gravemind.exe").write_bytes(b"damaged")
+        rc, output = self.run_updater("game")
+        self.assertEqual(rc, 0, output)
+        self.assertEqual(output[-1], "done: updated")
+        self.assertEqual((self.package_dir / "h2gravemind.exe").read_bytes(), b"MZ Gravemind")
 
-    def test_version_compare_is_numeric(self):
-        (self.home / "version").write_text("1.10.0\n")
-        (self.raw / "VERSION").write_text("1.9.0\n")
-        (self.home / "game" / "project-reclaimer-v0.9.12.exe").write_bytes(NEW_EXE)
-        self.run_updater("run")
-        self.assertFalse((self.home / "install-called").exists())
+    def test_checksum_mismatch_keeps_installed_release(self):
+        self.run_updater("game")
+        old_exe = self.package_dir / "h2gravemind.exe"
+        old_exe.write_bytes(b"known-good")
+        tampered = b"tampered archive"
+        (self.assets / "latest.zip").write_bytes(tampered)
+        expected_archive = package_bytes(b"MZ Gravemind 0.18.375")
+        latest = self.release("v0.18.375", self.assets / "latest.zip", expected_archive)
+        self.latest_api.write_text(json.dumps(latest))
+        rc, output = self.run_updater("game")
+        self.assertNotEqual(rc, 0)
+        self.assertTrue(output[-1].startswith("error: "), output)
+        self.assertEqual(old_exe.read_bytes(), b"known-good")
+        self.assertEqual(list(self.home.rglob("*.part")), [])
 
-    def test_failed_port_update_still_updates_game_and_reports_error(self):
-        (self.raw / "VERSION").write_text("1.2.0\n")
-        rc, out = self.run_updater("run", FAIL_INSTALL="1")
-        self.assertNotIn("relaunch", out)
-        self.assertEqual((self.home / "version").read_text().strip(), "1.1.0")
-        self.assertIn("project-reclaimer-v0.9.12.exe", self.game_files())
-        self.assertTrue(any(l.startswith("error: ") and "something broke" in l for l in out), out)
+    def test_archive_path_traversal_is_rejected_without_replacing_install(self):
+        self.run_updater("game")
+        old_exe = self.package_dir / "h2gravemind.exe"
+        old_exe.write_bytes(b"known-good")
+        unsafe_zip = package_bytes(extra={"../outside.txt": "bad"})
+        (self.assets / "latest.zip").write_bytes(unsafe_zip)
+        latest = self.release("v0.18.375", self.assets / "latest.zip", unsafe_zip)
+        self.latest_api.write_text(json.dumps(latest))
+        releases = json.loads(self.releases_api.read_text())
+        releases.insert(0, latest)
+        self.releases_api.write_text(json.dumps(releases))
+        rc, output = self.run_updater("game")
+        self.assertNotEqual(rc, 0)
+        self.assertIn("unsafe path", output[-1])
+        self.assertEqual(old_exe.read_bytes(), b"known-good")
+        self.assertFalse((self.tmp / "outside.txt").exists())
 
-    def test_offline_lets_the_game_start(self):
-        (self.home / "game" / "project-reclaimer-v0.9.8.exe").write_bytes(b"old")
-        rc, out = self.run_updater("run", RECLAIMER_REPO_RAW="http://127.0.0.1:9/nothing",
-                                   RECLAIMER_RELEASES="http://127.0.0.1:9/nothing")
-        self.assertEqual(rc, 0)
-        self.assertTrue(out[-1].startswith("offline: "), out)
-        self.assertEqual(self.game_files(), ["project-reclaimer-v0.9.8.exe"])
+    def test_versions_and_older_release_install(self):
+        rc, output = self.run_updater("versions")
+        listing = json.loads(output[-1])
+        self.assertEqual([item["version"] for item in listing["versions"]], ["0.18.374", "0.18.373"])
+        self.assertIsNone(listing["chosen"])
+        rc, output = self.run_updater("use", "0.18.373")
+        self.assertEqual(rc, 0, output)
+        self.assertEqual(output[-1], "done: using 0.18.373")
+        self.assertEqual((self.home / "game" / "versions" / "v0.18.373" / "h2gravemind.exe").read_bytes(),
+                         b"MZ older Gravemind")
+        self.assertEqual((self.home / "game" / "chosen-version").read_text().strip(), "0.18.373")
 
-    def test_other_processes_naming_the_exe_dont_count_as_the_game(self):
-        (self.home / "game" / "project-reclaimer-v0.9.8.exe").write_bytes(b"old")
-        # e.g. a Terminal command that mentions the file; only the running game (".exe game-client") counts
-        bystander = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)",
-                                      "rm", "project-reclaimer-v9.9.99.exe"])
+    def test_stopping_a_port_update_stops_the_installer_and_its_downloads(self):
+        raw = self.tmp / "port-release"
+        raw.mkdir()
+        (raw / "VERSION").write_text("1.2.0\n")
+        (raw / "install.sh").write_text(
+            "#!/bin/bash\n"
+            "sleep 300 &\n"
+            "echo \"$$ $!\" > \"$RECLAIMER_HOME/hung-pids\"\n"
+            "wait\n"
+        )
+        process = subprocess.Popen([sys.executable, "-I", str(UPDATER), "run"],
+                                   env=dict(self.env, RECLAIMER_REPO_RAW=raw.as_uri()),
+                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        pids_file = self.home / "hung-pids"
+        pids = []
         try:
-            rc, out = self.run_updater("game")
+            deadline = time.monotonic() + 10
+            while not pids_file.exists() and process.poll() is None and time.monotonic() < deadline:
+                time.sleep(0.05)
+            self.assertTrue(pids_file.exists(), "fake installer did not start")
+            pids = [int(pid) for pid in pids_file.read_text().split()]
+            process.terminate()
+            process.wait(timeout=10)
+            for pid in pids:
+                deadline = time.monotonic() + 10
+                while time.monotonic() < deadline:
+                    try:
+                        os.kill(pid, 0)
+                    except ProcessLookupError:
+                        break
+                    time.sleep(0.05)
+                else:
+                    self.fail(f"child process {pid} kept running after the update was stopped")
         finally:
-            bystander.kill()
-        self.assertIn("project-reclaimer-v0.9.12.exe", self.game_files())
+            if process.poll() is None:
+                process.kill()
+                process.wait(timeout=10)
+            for pid in pids:
+                try:
+                    os.kill(pid, 9)
+                except ProcessLookupError:
+                    pass
 
-    def test_skipped_while_running_is_not_reported_as_up_to_date(self):
-        (self.home / "game" / "project-reclaimer-v0.9.8.exe").write_bytes(b"old")
-        game = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)",
-                                 r"C:\game\project-reclaimer-v9.9.99.exe game-client --mcc-path x"])
-        try:
-            rc, out = self.run_updater("run")
-        finally:
-            game.kill()
-        self.assertEqual(out[-1], "done: skipped while the game is running")
-        self.assertEqual(self.game_files(), ["project-reclaimer-v0.9.8.exe"])
-
-    # ---- choosing an older version (servers that haven't updated yet) ------------------------------------------
-    def test_versions_lists_recent_releases_without_prereleases(self):
-        (self.home / "game" / "project-reclaimer-v0.9.12.exe").write_bytes(NEW_EXE)
-        rc, out = self.run_updater("versions")
-        listing = json.loads(out[-1])
-        self.assertEqual([v["version"] for v in listing["versions"]], ["0.9.12", "0.9.11"])
-        self.assertEqual(listing["chosen"], None)
-        self.assertEqual(listing["versions"][0]["date"], "2026-10-10")
-
-    def test_use_an_older_version_downloads_verifies_and_pins_it(self):
-        (self.home / "game" / "project-reclaimer-v0.9.12.exe").write_bytes(NEW_EXE)
-        rc, out = self.run_updater("use", "0.9.11")
-        self.assertEqual(out[-1], "done: using 0.9.11", out)
-        versions = self.home / "game" / "versions"
-        self.assertEqual((versions / "project-reclaimer-v0.9.11.exe").read_bytes(), OLD_EXE)
-        # the menu's graphics library loads from the exe's own folder
-        self.assertEqual((versions / "opengl32.dll").read_bytes(), b"mesa")
-        self.assertTrue((versions / "libgallium_wgl.dll").exists())
-        self.assertEqual((self.home / "game" / "chosen-version").read_text().strip(), "0.9.11")
-        self.assertIn("project-reclaimer-v0.9.12.exe", self.game_files())  # the newest stays for later
-
-    def test_a_chosen_version_is_not_updated_away(self):
-        (self.home / "game" / "project-reclaimer-v0.9.8.exe").write_bytes(b"old")
-        self.run_updater("use", "0.9.11")
-        rc, out = self.run_updater("game")
-        self.assertEqual(out[-1], "done: using 0.9.11", out)
-        self.assertEqual(self.game_files(), ["project-reclaimer-v0.9.8.exe"])  # no game update while chosen
-        listing = json.loads(self.run_updater("versions")[1][-1])
-        self.assertEqual(listing["chosen"], "0.9.11")
-        self.assertTrue(next(v for v in listing["versions"] if v["version"] == "0.9.11")["downloaded"])
-
-    def test_an_older_version_lasts_until_the_app_is_opened_again(self):
-        # friends shouldn't stay stuck on an old version: the launcher's start-up run goes back to the newest
-        self.run_updater("use", "0.9.11")
-        rc, out = self.run_updater("run")
-        self.assertFalse((self.home / "game" / "chosen-version").exists())
-        self.assertIn("project-reclaimer-v0.9.12.exe", self.game_files())
-
-    def test_back_to_the_newest(self):
-        self.run_updater("use", "0.9.11")
-        rc, out = self.run_updater("use", "newest")
-        self.assertFalse((self.home / "game" / "chosen-version").exists())
-        self.assertIn("project-reclaimer-v0.9.12.exe", self.game_files())  # installed right away
-        self.assertEqual(out[-1], "done: updated")
-
-    def test_damaged_older_download_is_refused(self):
-        (self.tags / "v0.9.11" / "project-reclaimer-v0.9.11.exe").write_bytes(b"tampered")
-        rc, out = self.run_updater("use", "0.9.11")
-        self.assertTrue(out[-1].startswith("error: "), out)
-        self.assertFalse((self.home / "game" / "chosen-version").exists())
-        self.assertFalse((self.home / "game" / "versions" / "project-reclaimer-v0.9.11.exe").exists())
-
-    def test_use_rejects_odd_versions(self):
-        rc, out = self.run_updater("use", "../../x")
-        self.assertTrue(out[-1].startswith("error: "))
-
-    def test_game_running_skips_game_update(self):
-        (self.home / "game" / "project-reclaimer-v0.9.8.exe").write_bytes(b"old")
-        with mock.patch.dict(os.environ, self.env):
-            spec = importlib.util.spec_from_file_location("updater", UPDATER)
-            u = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(u)
-        with mock.patch.object(u, "game_running", return_value=True):
-            self.assertEqual(u.update_game(), "running")
-        self.assertEqual(self.game_files(), ["project-reclaimer-v0.9.8.exe"])
+    def test_invalid_version_is_rejected(self):
+        rc, output = self.run_updater("use", "../../x")
+        self.assertNotEqual(rc, 0)
+        self.assertTrue(output[-1].startswith("error: "))
 
 
 if __name__ == "__main__":

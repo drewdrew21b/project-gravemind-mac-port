@@ -37,7 +37,7 @@ class HelperTest(unittest.TestCase):
         self.spec = self.home / "fake.json"
         self.args_log = self.home / "args.log"
         self.env = dict(os.environ, RECLAIMER_HOME=str(self.home), FAKE_DEPOT=str(self.spec),
-                        RECLAIMER_GAME_PROCESS=r"project-reclaimer-v9\.9\.99\.exe game-client")
+                        GRAVEMIND_GAME_PROCESS=r"h2gravemind\.exe")
 
     def tearDown(self):
         shutil.rmtree(self.home)
@@ -380,20 +380,6 @@ class HelperTest(unittest.TestCase):
             h.watch()
         self.assertEqual(self.status(h)["state"], "ready")
 
-    def test_game_counts_as_running_when_it_is_the_helpers_parent(self):
-        # launch.sh starts the helper, then exec's into the game: the game is the helper's parent process, and
-        # macOS pgrep skips a caller's ancestors unless told otherwise, so the helper stopped mid-game after 60 s
-        game = subprocess.run([sys.executable, "-c", (
-            "import subprocess, sys\n"
-            "child = ('import importlib.util; s = importlib.util.spec_from_file_location(\"h\", sys.argv[1]); '\n"
-            "         'h = importlib.util.module_from_spec(s); s.loader.exec_module(h); '\n"
-            "         'print(h.game_running())')\n"
-            "print(subprocess.run([sys.executable, '-I', '-c', 'import sys; ' + child, sys.argv[1]],\n"
-            "                     capture_output=True, text=True).stdout.strip())\n"),
-            # (a version no real game has, so a game running on this Mac can't make the test pass)
-            str(HELPER), "project-reclaimer-v9.9.99.exe game-client"], env=self.env, capture_output=True, text=True)
-        self.assertEqual(game.stdout.strip(), "True", game.stderr)
-
     def test_launcher_posts_the_notifications_when_it_is_running(self):
         # the launcher's own notifications say "Project Reclaimer"; the helper's osascript ones say "Script Editor"
         self.env["RECLAIMER_LAUNCHER_NOTIFIES"] = "1"
@@ -436,11 +422,11 @@ class HelperTest(unittest.TestCase):
             'n = int(Path(%r).read_text()); Path(%r).write_text(str(n + 1))\n'
             'spec = json.loads(Path(%r[n]).read_text())') % (str(counter), str(counter), specs)))
 
-    def test_game_download_first_install_signs_in_with_qr(self):
+    def test_halo2_download_first_install_signs_in_with_qr(self):
         dest = self.home / "mcc"
         self.fake(["Connecting to Steam3... Done!", *QR, SUCCESS, " Done!", "Got 442 licenses for account!",
-                   "  5.00% halo3/maps/a.map", " 50.00% halo3/maps/b.map", "100.00% halo3/halo3.dll",
-                   "Total downloaded: 35000000000 bytes"])
+                   "  5.00% halo2/preload/paks/a.pck", " 50.00% halo2/h2_maps_win64_dx11/ascension.map",
+                   "100.00% halo2/preload/paks/c.pck", "Total downloaded: 78000000000 bytes"])
         rc, out = self.run_helper("game-download", str(dest))
         self.assertEqual(rc, 0, out)
         self.assertIn("qr-begin", out)
@@ -453,26 +439,20 @@ class HelperTest(unittest.TestCase):
         self.assertLess(out.index("qr-end"), signed)
         self.assertLess(signed, next(i for i, l in enumerate(out) if l.startswith("progress: ")))
         run = self.depot_runs()[0]
-        for a in ["-qr", "-validate", "-remember-password", "976731", "976738", "976739", str(dest)]:
+        for a in ["-qr", "-validate", "-remember-password", "976731", "976735", "976736", "976737", str(dest)]:
             self.assertIn(a, run)
 
-    def test_game_download_adds_odst_when_asked_or_installed(self):
+    def test_halo2_download_uses_shared_and_campaign_depots(self):
         (self.home / "steam-account").write_text("RealName_1\n")
-        self.fake(["Logging 'RealName_1' into Steam3...", " Done!", "100.00% halo3/halo3.dll"])
+        self.fake(["Logging 'RealName_1' into Steam3...", " Done!", "100.00% halo2/preload/paks/c.pck"])
         dest = self.home / "mcc"
         self.run_helper("game-download", str(dest))
-        self.assertNotIn("1064222", self.depot_runs()[-1])  # Halo 3 only, unless the player asks
-        self.run_helper("game-download", str(dest), "--odst")
-        self.assertIn("1064222", self.depot_runs()[-1])
-        self.assertIn("976738", self.depot_runs()[-1])
-        (dest / "halo3odst").mkdir()
-        (dest / "halo3odst" / "halo3odst.dll").write_bytes(b"MZ")
-        self.run_helper("game-download", str(dest))  # Repair checks ODST too once it's installed
-        self.assertIn("1064222", self.depot_runs()[-1])
+        self.assertEqual(self.depot_runs()[-1][self.depot_runs()[-1].index("-depot") + 1:
+                                                   self.depot_runs()[-1].index("-os")], ["976731", "976735", "976736", "976737"])
 
     def test_game_download_uses_the_saved_login(self):
         (self.home / "steam-account").write_text("RealName_1\n")
-        self.fake(["Logging 'RealName_1' into Steam3...", " Done!", "100.00% halo3/halo3.dll"])
+        self.fake(["Logging 'RealName_1' into Steam3...", " Done!", "100.00% halo2/preload/paks/c.pck"])
         rc, out = self.run_helper("game-download", str(self.home / "mcc"))
         self.assertEqual(out[-1], "ok")
         self.assertNotIn("qr-begin", out)
@@ -482,7 +462,7 @@ class HelperTest(unittest.TestCase):
     def test_game_download_falls_back_to_qr_when_the_saved_login_expired(self):
         (self.home / "steam-account").write_text("RealName_1\n")
         self.depot_seq([(["Access token was rejected (AccessDenied)."], 1),
-                        ([*QR, SUCCESS, "Got 1 licenses for account!", "100.00% halo3/halo3.dll"], 0)])
+                        ([*QR, SUCCESS, "Got 1 licenses for account!", "100.00% halo2/preload/paks/c.pck"], 0)])
         rc, out = self.run_helper("game-download", str(self.home / "mcc"))
         self.assertEqual(out[-1], "ok", out)
         self.assertIn("qr-begin", out)
@@ -515,7 +495,7 @@ class HelperTest(unittest.TestCase):
     def test_join_refused_for_version_is_recorded_with_the_servers_version(self):
         p = self.watch_log(["A join link asks to join 72.222.230.115:49176.",
                             "Joining 72.222.230.115:49176 from a join link.",
-                            "Joining server failed: This server runs Project Reclaimer 0.9.7, older than your 0.9.13: "
+                            "Joining server failed: This server runs Project Gravemind 0.9.7, older than your 0.9.13: "
                             "its host needs to update it."])
         self.assertEqual((p["address"], p["server_version"], p["mine"], p["kind"]),
                          ("72.222.230.115:49176", "0.9.7", "0.9.13", "version"))

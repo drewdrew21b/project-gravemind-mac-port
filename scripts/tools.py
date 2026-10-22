@@ -1,35 +1,20 @@
 #!/usr/bin/env python3
-"""The launcher window's Tools menu and automatic fixes, one command per action.
+"""The launcher window's Gravemind tools, one command per action.
 
-  net-check          "ok" or "missing": are the local network addresses Reclaimer needs on lo0?
-  net-fix            reinstall + restart the network startup task (one macOS password prompt)
-  controller-check   "stuck" if macOS's game controller service is stuck (no app sees controllers until a restart)
-  audio-check        where the Mac's sound goes, tab-separated: "ok <output>", "muted <output>", "virtual <output>"
-                     or "headset <headphones> <output>" (the game keeps the output it starts with)
-  crash-check        "crash: <plain explanation>" if the last game log shows a crash, else "ok"
-  startup-state      JSON: whether startup is progressing: "starting", "building", "ready", "stalled" or "stopped",
-                     with the Forge cache's progress and the log markers behind that verdict
-  force-quit         stop the game, Wine and wineserver for this install (frozen windows Force Quit can't close)
-  mods               JSON: downloaded Workshop mods with titles and sizes, plus free disk space
-  remove-mod <id>    delete one downloaded mod (not while the game runs)
-  report             zip the logs, versions and what startup is doing (no Steam account name) to the Desktop:
-                     "ok <path>"
-  reset-graphics     put back the tuned graphics settings
-  forget-steam       forget the saved Steam account (the window then shows a QR code)
-  games              JSON: Halo 3 and Halo 3: ODST (installed or not, size, folder), MCC's size and free disk space
-  add-game <id>...   download games (halo3, odst) from the player's Steam copy (QR codes and progress as
-                     workshop_helper game-download)
-  repair-game <id>   re-check one installed game's files against Steam, the same way
-  repair             the same for every installed game
-  remove-game <id>   delete one game's files (MCC's shared files stay)
-  uninstall          remove the app, the install folder and the network startup task
-  server-version <host:port>   "<version> <name>" of the Project Reclaimer a server runs, or "unreachable"
-  join <host:port>   join a server in the running game (hands it a join link, as a link in a browser would)
+    controller-check   "stuck" if macOS's game controller service is stuck
+    audio-check        the current output and whether it is muted or virtual
+    crash-check        "crash: <plain explanation>" if the last game log shows a crash, else "ok"
+    force-quit         stop this install's Gravemind process, Wine, and wineserver
+    report             zip logs, Gravemind version, and Halo 2 install state to the Desktop
+    games              Halo 2 installed state and size, MCC size, and free disk space
+    add-game halo2     download Halo 2 from the player's Steam copy using QR sign-in
+    repair-game halo2  check installed Halo 2 files against Steam
+    repair             the same Halo 2 file check
+    remove-game halo2  delete Halo 2 files (MCC shared files stay)
+    uninstall          remove this app and install folder
 
-Each prints "ok" (or its result) last, or "error: <plain reason>". RECLAIMER_TOOLS_DRYRUN=1 prints admin commands
-("dry-run admin: ...") instead of asking for the password, for tests.
+Each prints "ok" (or its result) last, or "error: <plain reason>".
 """
-import hashlib
 import importlib.util
 import json
 import os
@@ -43,26 +28,17 @@ import zipfile
 from pathlib import Path
 
 HOME = Path.home()
-BASE = Path(os.environ.get("RECLAIMER_HOME", HOME / "Games" / "ProjectReclaimer"))
+BASE = Path(os.environ.get("RECLAIMER_HOME", HOME / "Games" / "ProjectGravemind"))
 GAME = BASE / "game"
 LOGS = BASE / "logs"
 STEAMAPPS = BASE / "prefix-wine" / "drive_c" / "Program Files (x86)" / "Steam" / "steamapps"
 WORKSHOP = STEAMAPPS / "workshop" / "content" / "976730"
 MCC_DIR = STEAMAPPS / "common" / "Halo The Master Chief Collection"
 APP = Path(os.environ.get("RECLAIMER_APP_PATH")
-           or Path(os.environ.get("RECLAIMER_APPS_DIR", HOME / "Applications")) / "Project Reclaimer.app")
+           or Path(os.environ.get("RECLAIMER_APPS_DIR", HOME / "Applications")) / "Project Gravemind.app")
 DESKTOP = Path(os.environ.get("RECLAIMER_DESKTOP", HOME / "Desktop"))
-CLIENT_EXE = re.compile(r"^project-reclaimer-v[0-9.]+\.exe$")
-GAME_PROCESS = os.environ.get("RECLAIMER_GAME_PROCESS", r"project-reclaimer-v[0-9.]+\.exe game-client")
-DAEMON = "local.projectreclaimer.loopback"
-DAEMON_PLIST = f"/Library/LaunchDaemons/{DAEMON}.plist"
-INSTALLED_PLIST = Path(os.environ.get("RECLAIMER_TEST_DAEMON_PLIST", DAEMON_PLIST))  # (tests point it elsewhere)
-DAEMON_DIR = os.environ.get("RECLAIMER_TEST_DAEMON_DIR", "/Library/Application Support/ProjectReclaimer")  # (tests)
-# what the root startup task must be: checked as root after copying it where only root can write (also in install.sh;
-# tests/test_tools.py checks all four match scripts/)
-LOOPBACK_SHA = "23c93f7c5e587da1dba205534b4661042dd13b5142cbac6846f1ffdcf4a3cd83"
-LOOPBACK_PLIST_SHA = "27fcc35a99d21f2b266cca4041bbd8388e72738c8b3d1797e43f243b7556d7cd"
-DRYRUN = os.environ.get("RECLAIMER_TOOLS_DRYRUN", "")  # "1": print admin commands; "cancel": as if cancelled
+GAME_PROCESS = os.environ.get("GRAVEMIND_GAME_PROCESS",
+                              re.escape(str(GAME)) + r"/(?:gravemind|versions/v[0-9.]+)/h2gravemind\.exe")
 # How long the Forge asset library may write nothing before startup is called stalled. The first build takes about a
 # minute on the hardware it was tuned for; three minutes of no writes means it is not going to finish on its own.
 try:
@@ -71,40 +47,8 @@ except ValueError:  # (a hand-set override shouldn't stop the Tools menu working
     FORGE_STALL_SECONDS = 180
 
 
-def loopback_prefixes():
-    """The address ranges the installed reclaimer-loopback.sh adds (e.g. 127.0.2), so a new range is checked too."""
-    try:
-        text = (GAME / "reclaimer-loopback.sh").read_text()
-        m = re.search(r"for p in ([0-9. ]+); do", text)
-        if m:
-            return m.group(1).split()
-    except OSError:
-        pass
-    return ["127.0.0", "127.0.1", "127.0.2", "127.0.3", "127.3.1", "127.3.2", "127.3.3"]
-
-
-# one sample address per range (127.0.0.1 is always there, so 127.0.0.2 stands for its range)
-EXPECTED_ALIASES = [p + (".2" if p == "127.0.0" else ".1") for p in loopback_prefixes()]
-
-
 def say(line):
     print(line, flush=True)
-
-
-def as_admin(command, prompt):
-    """Run a shell command as root behind macOS's own password dialog."""
-    if DRYRUN:
-        say("dry-run admin: " + command)
-        return DRYRUN != "cancel"
-    return subprocess.run(["/usr/bin/osascript", "-e", admin_script(command, prompt)],
-                          capture_output=True).returncode == 0
-
-
-def admin_script(command, prompt):
-    """AppleScript running a shell command as root behind macOS's password dialog. JSON string syntax is AppleScript's
-    too, but only with non-ASCII left as is: AppleScript has no \\u escape (a path with é made net-fix fail)."""
-    return 'do shell script {} with prompt {} with administrator privileges'.format(
-        json.dumps(command, ensure_ascii=False), json.dumps(prompt, ensure_ascii=False))
 
 
 def game_running():
@@ -112,63 +56,13 @@ def game_running():
 
 
 def helper():
-    """workshop_helper.py from this install, for its Steam and Workshop functions."""
+    """Load the Steam download helper from this install."""
     if "workshop_helper" not in sys.modules:
         spec = importlib.util.spec_from_file_location("workshop_helper", GAME / "workshop_helper.py")
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
         sys.modules["workshop_helper"] = mod
     return sys.modules["workshop_helper"]
-
-
-def quoted(path):
-    return "'" + str(path).replace("'", "'\\''") + "'"
-
-
-# ---------------------------------------------------------------------------------------------------------------
-def lo0():
-    return subprocess.run(["/sbin/ifconfig", "lo0"], capture_output=True, text=True).stdout
-
-
-def file_sha256(path):
-    try:
-        return hashlib.sha256(Path(path).read_bytes()).hexdigest()
-    except OSError:
-        return None
-
-
-def net_check():
-    have = set(re.findall(r"inet (127\.\d+\.\d+\.\d+)", lo0()))
-    return "ok" if all(a in have for a in EXPECTED_ALIASES) else "missing"
-
-
-def net_fix():
-    """Install the startup task's files again and restart it, which re-adds every address (as install.sh does)."""
-    script, plist = GAME / "reclaimer-loopback.sh", GAME / f"{DAEMON}.plist"
-    installed = Path(DAEMON_DIR) / "reclaimer-loopback.sh"
-    restart = (f"{{ launchctl bootout system/{DAEMON} 2>/dev/null; true; }} && "
-               f"launchctl bootstrap system {DAEMON_PLIST}")
-    if file_sha256(installed) == LOOPBACK_SHA and file_sha256(INSTALLED_PLIST) == LOOPBACK_PLIST_SHA:
-        command = restart  # (root's own copy is right: nothing of the player's needs to go to root)
-    else:
-        if not script.exists() or not plist.exists():
-            return "error: This install is missing its network files. Open Project Reclaimer again to update it."
-        target = DAEMON_DIR + "/reclaimer-loopback.sh"
-        # copy first, then check the copies (now only root can change them) against what this script ships with
-        command = (f"mkdir -p {quoted(DAEMON_DIR)} && "
-                   f"install -o root -g wheel -m 755 {quoted(script)} {quoted(target)} && "
-                   f"install -o root -g wheel -m 644 {quoted(plist)} {DAEMON_PLIST} && "
-                   f"{{ printf '%s  %s\\n' {LOOPBACK_SHA} {quoted(target)} {LOOPBACK_PLIST_SHA} {DAEMON_PLIST} | "
-                   f"shasum -a 256 -c -s || {{ rm -f {quoted(target)} {DAEMON_PLIST}; false; }}; }} && " + restart)
-    if not as_admin(command, "Project Reclaimer is fixing its network settings."):
-        return "error: The network setup wasn't fixed (the password box was cancelled)."
-    if DRYRUN:
-        return "ok"
-    for _ in range(20):  # the task adds ~1,300 addresses; give it a moment
-        if net_check() == "ok":
-            return "ok"
-        time.sleep(1)
-    return "error: The network setup is still incomplete. Restart your Mac, then open Project Reclaimer again."
 
 
 def gamecontrollerd_state():
@@ -244,7 +138,7 @@ CRASHES = [
     ("device lost",
      "The graphics card stopped responding, so the game closed. Press Play to start again."),
     (" panicked at ",
-     "Project Reclaimer hit an error and closed. Press Play to start again. If it keeps happening, use "
+    "Project Gravemind hit an error and closed. Press Play to start again. If it keeps happening, use "
      "Tools > Send a report."),
 ]
 
@@ -479,8 +373,7 @@ def report():
         # (and names logged before a Forget Steam, and the Mac's user name in paths)
         text = re.sub(r"(-username|Signed in as|login with -username) \S+", r"\1 <steam account>", text)
         return text.replace(str(HOME), "~")
-    startup_lines, startup = startup_evidence()
-    summary = [f"Project Reclaimer Mac Port report, {time.strftime('%Y-%m-%d %H:%M')}"] + startup_lines
+    summary = [f"Project Gravemind Mac Port report, {time.strftime('%Y-%m-%d %H:%M')}"]
 
     for label, cmd in [("macOS", ["sw_vers", "-productVersion"]), ("Mac", ["sysctl", "-n", "machdep.cpu.brand_string"]),
                        ("Memory", ["sysctl", "-n", "hw.memsize"])]:
@@ -490,16 +383,17 @@ def report():
         summary.append("Mac port version: " + (BASE / "version").read_text().strip())
     except OSError:
         summary.append("Mac port version: 1.0 or older")
-    summary.append("Game: " + ", ".join(sorted(p.name for p in GAME.glob("project-reclaimer-v*.exe"))))
+    try:
+        version = (GAME / "gravemind" / ".release-version").read_text().strip()
+    except OSError:
+        version = "not installed"
+    summary.append("Project Gravemind: " + version)
+    summary.append("Halo 2 installed: " + ("yes" if game_installed("halo2") else "no"))
     summary.append(f"Free disk space: {shutil.disk_usage(BASE).free / 1e9:.0f} GB")
-    summary.append("Network addresses: " + net_check())
-    summary.append("Workshop mods: " + ", ".join(m["title"] for m in json.loads(mods())["mods"]))
     DESKTOP.mkdir(parents=True, exist_ok=True)
-    path = DESKTOP / f"Project Reclaimer report {time.strftime('%Y-%m-%d %H.%M')}.zip"
+    path = DESKTOP / f"Project Gravemind report {time.strftime('%Y-%m-%d %H.%M')}.zip"
     with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as z:
         z.writestr("summary.txt", scrub("\n".join(summary) + "\n"))
-        if startup is not None:  # (the same evidence the window shows, as data a maintainer can read)
-            z.writestr("startup-state.json", scrub(json.dumps(startup, indent=2)) + "\n")
         for log in sorted(LOGS.glob("*.log")):
             z.writestr(f"logs/{log.name}", scrub(log.read_text(errors="replace")[-2_000_000:]))
     return f"ok {path}"
@@ -520,16 +414,24 @@ def forget_steam():
 
 # id: (title, folder in MCC_DIR, its depots). Each game's depots write only into its folder; MCC's shared files
 # (BASE_DEPOT: MCC/, Data/, Engine/) come with either and stay when one is removed.
-GAMES = {"halo3": ("Halo 3", "halo3", ["976738", "976739"]),  # Halo 3, its multiplayer
-         "odst": ("Halo 3: ODST", "halo3odst", ["1064222"])}
-GAME_DLL = {"halo3": "halo3/halo3.dll", "odst": "halo3odst/halo3odst.dll"}
+GAMES = {"halo2": ("Halo 2", "halo2", ["976735", "976736", "976737"])}
 BASE_DEPOT = "976731"
-GAME_GB = {"halo3": 36, "odst": 9}  # roughly what each download takes on disk, MCC's shared files included in Halo 3's
-HALO3_REMOVED = BASE / "halo3-removed"  # (Halo 3 was removed in Tools on purpose: updates leave it be)
+GAME_GB = {"halo2": 78}  # campaign, both multiplayer depots, and MCC shared files
 
 
 def game_installed(gid):
-    return (MCC_DIR / GAME_DLL[gid]).is_file()
+    root = MCC_DIR / GAMES[gid][1]
+    return game_campaign_installed(gid) and game_multiplayer_installed(gid)
+
+
+def game_campaign_installed(gid):
+    root = MCC_DIR / GAMES[gid][1]
+    return any((root / "preload" / "paks").glob("*.pck"))
+
+
+def game_multiplayer_installed(gid):
+    root = MCC_DIR / GAMES[gid][1]
+    return (root / "h2_maps_win64_dx11" / "ascension.map").is_file()
 
 
 def download_games(ids):
@@ -540,13 +442,13 @@ def download_games(ids):
 
 
 def repair():
-    """Check every installed game against Steam (Halo 3's depots when nothing is installed)."""
-    return download_games([gid for gid in GAMES if game_installed(gid)] or ["halo3"])
+    """Check Halo 2 campaign and multiplayer files against Steam."""
+    return download_games(["halo2"])
 
 
 def repair_game(gid):
     if gid not in GAMES:
-        return "error: That isn't a game Project Reclaimer plays."
+        return "error: That isn't a game Project Gravemind plays."
     if game_running():
         return "error: Quit the game first."
     if not game_installed(gid):
@@ -556,15 +458,22 @@ def repair_game(gid):
 
 def add_games(ids):
     if not ids or any(gid not in GAMES for gid in ids):
-        return "error: That isn't a game Project Reclaimer plays."
-    need = sum(GAME_GB[gid] for gid in ids if not game_installed(gid)) + 2  # (+2 GB to spare)
+        return "error: That isn't a game Project Gravemind plays."
+    need = 4  # spare space for DepotDownloader and temporary files
+    for gid in ids:
+        if game_installed(gid):
+            continue
+        if gid == "halo2" and game_campaign_installed(gid):
+            need += 30  # both multiplayer depots
+        elif gid == "halo2" and game_multiplayer_installed(gid):
+            need += 32  # campaign depot
+        else:
+            need += GAME_GB[gid]
     free = shutil.disk_usage(BASE).free / 1e9
     if free < need:
         return (f"error: That needs about {need} GB free, and your Mac has {free:.0f} GB. Free up some space "
                 "(Tools > Mods and disk space can remove downloaded mods), then try again.")
     result = download_games(ids)
-    if result == "ok" and "halo3" in ids:
-        HALO3_REMOVED.unlink(missing_ok=True)
     return result
 
 
@@ -580,14 +489,12 @@ def games():
 
 def remove_game(gid):
     if gid not in GAMES:
-        return "error: That isn't a game Project Reclaimer plays."
+        return "error: That isn't a game Project Gravemind plays."
     title, folder, depots = GAMES[gid]
     if game_running():
         return "error: Quit the game first."
     if not (MCC_DIR / folder).is_dir():
         return f"error: {title} isn't installed."
-    if gid == "halo3":
-        HALO3_REMOVED.write_text("")
     try:
         shutil.rmtree(MCC_DIR / folder)
     except OSError as e:
@@ -597,9 +504,6 @@ def remove_game(gid):
         for f in (MCC_DIR / ".DepotDownloader").glob(depot + "_*.manifest*"):
             f.unlink(missing_ok=True)
     return "ok"
-
-
-ADDRESS = re.compile(r"[A-Za-z0-9.-]+:\d{1,5}")
 
 
 def controller_mappings_file():
@@ -632,81 +536,19 @@ def game_env():
     return env
 
 
-WINE = BASE / "wine" / "Wine Staging.app" / "Contents" / "Resources" / "wine" / "bin" / "wine"
-
-
-def game_exe():
-    """(folder, exe name) the game starts from: the chosen older version, else the newest (as run.sh decides)."""
-    try:
-        chosen = (GAME / "chosen-version").read_text().strip()
-    except OSError:
-        chosen = ""
-    if chosen and (GAME / "versions" / f"project-reclaimer-v{chosen}.exe").exists():
-        return GAME / "versions", f"project-reclaimer-v{chosen}.exe"
-    exes = [e for e in GAME.glob("project-reclaimer-v*.exe") if CLIENT_EXE.match(e.name)]
-    if not exes:
-        return None, None
-    newest = max(exes, key=lambda p: [int(x) for x in re.findall(r"\d+", p.name)])
-    return GAME, newest.name
-
-
-def server_version(address):
-    if not ADDRESS.fullmatch(address):
-        return "error: That isn't a server address."
-    folder, exe = game_exe()
-    if not exe:
-        return "error: Project Reclaimer isn't installed."
-    try:
-        p = subprocess.run([str(WINE), exe, "server-status", address], cwd=folder, env=game_env(),
-                           capture_output=True, text=True, timeout=40)
-    except subprocess.TimeoutExpired:
-        return "unreachable"
-    text = p.stdout
-    start = text.find("{")
-    try:
-        info = json.loads(text[start:text.rindex("}") + 1]) if start >= 0 else {}
-    except ValueError:
-        info = {}
-    version = str(info.get("version") or "")
-    if not re.fullmatch(r"\d+(\.\d+){1,3}", version):
-        return "unreachable"
-    name = " ".join(str(info.get("name") or address).split())  # (the server's to choose: one line, no control chars)
-    name = "".join(c for c in name if c.isprintable())
-    return f"{version} {name}".strip()
-
-
-def join(address):
-    if not ADDRESS.fullmatch(address):
-        return "error: That isn't a server address."
-    folder, exe = game_exe()
-    if not exe:
-        return "error: Project Reclaimer isn't installed."
-    # a second start with only the link hands it to the running game and exits (other arguments make it ignore it)
-    subprocess.Popen([str(WINE), exe, f"reclaimer://join?server={address}"], cwd=folder, env=game_env(),
-                     stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                     start_new_session=True)
-    return "ok"
-
-
 def uninstall():
     if not (BASE / "game").is_dir() or not (BASE / "prefix-wine").is_dir():
-        return f"error: {BASE} doesn't look like a Project Reclaimer install, so nothing was removed."
+        return f"error: {BASE} doesn't look like a Project Gravemind install, so nothing was removed."
     stopped = force_quit()
     if stopped != "ok":
         return stopped  # (nothing deleted while the game still runs)
     subprocess.run(["pkill", "-f", str(GAME / "workshop_helper.py")], capture_output=True)  # (only this install's)
     shutil.rmtree(APP, ignore_errors=True)
-    shutil.rmtree(APP.with_name("Project Reclaimer Metal.app"), ignore_errors=True)  # (from early versions)
     shutil.rmtree(BASE, ignore_errors=True)
-    if not os.environ.get("RECLAIMER_KEEP_NETWORK") and INSTALLED_PLIST.exists():
-        removed = as_admin(f"launchctl bootout system/{DAEMON} 2>/dev/null; rm -f {DAEMON_PLIST}; "
-                           f"rm -rf {quoted(DAEMON_DIR)}", "Project Reclaimer is removing its network setting.")
-        if not removed:
-            return "ok network-kept"  # (harmless: extra local addresses that nothing else uses)
     return "ok"
 
 
-COMMANDS = {"net-check": net_check, "net-fix": net_fix, "controller-check": controller_check,
+COMMANDS = {"controller-check": controller_check,
             "audio-check": audio_check, "crash-check": crash_check, "startup-state": startup_state,
             "force-quit": force_quit, "mods": mods,
             "report": report, "reset-graphics": reset_graphics, "forget-steam": forget_steam, "repair": repair,
@@ -723,17 +565,6 @@ def main(argv):
         result = repair_game(argv[2])
     elif len(argv) >= 3 and argv[1] == "add-game":
         result = add_games(argv[2:])
-    elif len(argv) == 3 and argv[1] == "server-version":
-        result = server_version(argv[2])
-    elif len(argv) == 3 and argv[1] == "join":
-        result = join(argv[2])
-    elif len(argv) == 2 and argv[1] == "net-check":
-        result = net_check()
-        for _ in range(8):  # right after login the startup task may still be adding its ~1,300 addresses
-            if result == "ok":
-                break
-            time.sleep(1)
-            result = net_check()
     elif len(argv) == 2 and argv[1] in COMMANDS:
         result = COMMANDS[argv[1]]()
     else:

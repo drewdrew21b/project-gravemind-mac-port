@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fetch Steam Workshop mods for Project Reclaimer under Wine, without the Steam client.
+"""Steam QR sign-in, Halo 2 MCC downloads, and legacy Workshop helpers.
 
 Watches Reclaimer's client log for mods it can't get from Steam Workshop (there is no Steam client under Wine):
 "Mod <title> not downloaded: ... Workshop" (Workshop-only mods), and "Workshop for <title> unavailable ... using the
@@ -14,12 +14,11 @@ Steam sign-in (used by the launcher before the game starts; prints one result li
   login-check   "ok <account>", "need-login" or "offline": does the saved Steam login still work?
   login-qr      QR sign-in: "qr-begin", "qr: <row>"..., "qr-end" for each code DepotDownloader shows, then
                 "ok <account>" (saved to steam-account) or "error: <reason>"
-  game-download <folder> [--odst]   Halo 3's game files from the player's Steam copy (first install, Repair game
-                files), and Halo 3: ODST's with --odst or once it's installed: QR codes as above when needed,
+    game-download <folder>   Halo 2 and MCC shared files from the player's Steam copy (first install, Repair game
+                                files): QR codes as above when needed,
                 "progress: <percent>", then "ok" or "error: <plain reason>"
 
-Usage: workshop_helper.py watch | get [--in-game] <workshop id or title>... | login-check | login-qr |
-       game-download <folder> [--odst]
+Usage: workshop_helper.py login-check | login-qr | game-download <folder>
 """
 import fcntl
 import json
@@ -37,7 +36,7 @@ import urllib.request
 from pathlib import Path
 
 HOME = Path.home()
-BASE = Path(os.environ.get("RECLAIMER_HOME", HOME / "Games" / "ProjectReclaimer"))
+BASE = Path(os.environ.get("RECLAIMER_HOME", HOME / "Games" / "ProjectGravemind"))
 LOG = Path(os.environ.get("RECLAIMER_LOG", BASE / "logs" / "client.log"))
 ACCOUNT_FILE = BASE / "steam-account"
 WORKSHOP_ID = re.compile(r"[0-9]{1,20}")
@@ -60,9 +59,10 @@ DEPOT = BASE / "tools" / "DepotDownloader"
 WORKSHOP = (BASE / "prefix-wine" / "drive_c" / "Program Files (x86)" / "Steam" / "steamapps" / "workshop"
             / "content" / "976730")
 # Reclaimer's profile lives in the prefix (the installer unlinks Documents from ~/Documents)
-PROFILES = [d / "Documents" / "My Games" / "Project Reclaimer"
+PROFILES = [d / "Documents" / "My Games" / "Project Gravemind"
             for d in (BASE / "prefix-wine" / "drive_c" / "users").glob("*")]
-GAME_PROCESS = os.environ.get("RECLAIMER_GAME_PROCESS", r"project-reclaimer-v[0-9.]+\.exe game-client")  # (tests)
+GAME_PROCESS = os.environ.get("GRAVEMIND_GAME_PROCESS",
+                             re.escape(str(BASE / "game")) + r"/(?:gravemind|versions/v[0-9.]+)/h2gravemind\.exe")
 GAME_GRACE = 60  # seconds the game must be gone before the watching helper stops
 APP_ID = "976730"
 FAILED = re.compile(r"^Mod (.+?) not downloaded: .*Workshop")
@@ -72,7 +72,7 @@ CHARACTER_PACK = re.compile(r" \(characters\)$")
 PROGRESS = re.compile(r"^\s*(\d+(?:\.\d+)?)% ")
 # joins: the address being joined, and why a join failed (the window offers to switch versions and rejoin)
 JOINING = re.compile(r"^Joining ([A-Za-z0-9.-]+:\d+)\b")
-JOIN_VERSION = re.compile(r"This server runs Project Reclaimer ([0-9][0-9.]*[0-9]), (?:older|newer) than your ([0-9][0-9.]*[0-9])")
+JOIN_VERSION = re.compile(r"This server runs Project Gravemind ([0-9][0-9.]*[0-9]), (?:older|newer) than your ([0-9][0-9.]*[0-9])")
 JOIN_NO_ANSWER = re.compile(r"Public join timed out|The server did not answer")
 # a small MCC Workshop item: fetching only its manifest is a quick test that the saved login works
 CHECK_ITEM = "2984061723"
@@ -93,7 +93,7 @@ def applescript_str(text):
     return '"' + text.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
-def notify(text, title="Project Reclaimer mods"):
+def notify(text, title="Project Gravemind"):
     log(text)
     if os.environ.get("RECLAIMER_LAUNCHER_NOTIFIES"):  # the launcher window posts its own, from the mod status files
         return
@@ -246,22 +246,20 @@ def login_qr():
     return "error: " + QR_EXPIRED
 
 
-MCC_DEPOTS = ["976731", "976738", "976739"]  # MCC base, Halo 3, Halo 3 multiplayer (~35 GB)
-# Halo 3: ODST (~9 GB, optional): Project Reclaimer 0.9.19+ plays its campaign and Firefight from halo3odst/
-ODST_DEPOT = "1064222"
+MCC_DEPOTS = ["976731", "976735", "976736", "976737"]  # shared files, H2 campaign, and both H2 multiplayer depots
 NOT_OWNED = re.compile(r"is not available from this account|No subscription|AccessDenied for (app|depot)", re.I)
 
 
-def odst_installed(dest):
-    return (Path(dest) / "halo3odst" / "halo3odst.dll").is_file()
+def halo2_installed(dest):
+    root = Path(dest) / "halo2"
+    return any((root / "preload" / "paks").glob("*.pck")) and (root / "h2_maps_win64_dx11" / "ascension.map").is_file()
 
 
 def game_download(dest, depots=None):
     """Download (or check and repair) the game files from the player's own Steam copy, for the launcher window:
-    QR codes and "progress: <percent>" lines, then "ok" or "error: <plain reason>". By default Halo 3's depots, and
-    ODST's too once it's installed (so Repair checks it)."""
+    QR codes and "progress: <percent>" lines, then "ok" or "error: <plain reason>"."""
     if depots is None:
-        depots = MCC_DEPOTS + ([ODST_DEPOT] if odst_installed(dest) else [])
+        depots = MCC_DEPOTS
     Path(dest).mkdir(parents=True, exist_ok=True)
     base = [str(DEPOT), "-app", APP_ID, "-depot", *depots, "-os", "windows", "-dir", str(dest), "-validate"]
     last, signed_in = [0.0], [False]
@@ -453,7 +451,7 @@ def _download(wid, label, details, ready_hint):
     if not name:
         # the launcher window shows the QR sign-in when it sees this
         write_status(wid, state="login_needed")
-        notify(f"Sign in to Steam in the Project Reclaimer window to download {label}.")
+        notify(f"Sign in to Steam in the Project Gravemind window to download {label}.")
         return False
     dest = WORKSHOP / wid
     dest.mkdir(parents=True, exist_ok=True)
@@ -482,10 +480,10 @@ def _download(wid, label, details, ready_hint):
     sys.stderr.write(text[-4000:])
     if LOGIN_NEEDED.search(text):
         write_status(wid, state="login_needed")
-        notify(f"Steam sign-in needed: open the Project Reclaimer window to download {label}.")
+        notify(f"Steam sign-in needed: open the Project Gravemind window to download {label}.")
     else:
         write_status(wid, state="failed")
-        notify(f"Could not download {label}. See ~/Games/ProjectReclaimer/logs/workshop-helper.log")
+        notify(f"Could not download {label}. See ~/Games/ProjectGravemind/logs/workshop-helper.log")
     return False
 
 
@@ -617,7 +615,7 @@ def watch():
 
 def main(argv):
     if len(argv) >= 3 and argv[1] == "game-download":
-        result = game_download(argv[2], MCC_DEPOTS + [ODST_DEPOT] if "--odst" in argv[3:] else None)
+        result = game_download(argv[2])
         print(result, flush=True)
         return 0 if result == "ok" else 1
     if len(argv) < 2 or argv[1] not in ("watch", "get", "login-check", "login-qr"):

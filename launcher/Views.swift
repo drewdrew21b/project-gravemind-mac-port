@@ -5,6 +5,23 @@ import UserNotifications
 
 // MARK: - views
 
+struct AccentLinearProgressStyle: ProgressViewStyle {
+    let color: Color
+
+    func makeBody(configuration: Configuration) -> some View {
+        GeometryReader { geometry in
+            ZStack(alignment: .leading) {
+                Capsule().fill(Color.secondary.opacity(0.2))
+                Capsule().fill(color)
+                    .frame(width: geometry.size.width * CGFloat(configuration.fractionCompleted ?? 0))
+            }
+        }
+        .frame(height: 8)
+        .accessibilityLabel("Progress")
+        .accessibilityValue("\(Int((configuration.fractionCompleted ?? 0) * 100)) percent")
+    }
+}
+
 struct StepRow: View {
     let title: String
     let step: Step
@@ -16,7 +33,7 @@ struct StepRow: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text(title).font(.headline)
                 Text(detail).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                if let progress { ProgressView(value: progress).tint(accent) }
+                if let progress { ProgressView(value: progress).progressViewStyle(AccentLinearProgressStyle(color: accent)) }
             }
             Spacer(minLength: 0)
         }
@@ -32,7 +49,7 @@ struct StepRow: View {
     @ViewBuilder private var glyph: some View {
         switch step {
         case .waiting: Image(systemName: "circle.dotted").foregroundStyle(.tertiary).font(.title3)
-        case .working: ProgressView().controlSize(.small)
+        case .working: ProgressView().controlSize(.small).tint(accent)
         case .done: Image(systemName: "checkmark.circle.fill").foregroundStyle(accent).font(.title3)
         case .warning: Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange).font(.title3)
         case .failed: Image(systemName: "xmark.octagon.fill").foregroundStyle(.red).font(.title3)
@@ -82,7 +99,7 @@ struct StartupRow: View {
 
     @ViewBuilder private var glyph: some View {
         switch display.look {
-        case .working: ProgressView().controlSize(.small).frame(width: 22, height: 22)
+        case .working: ProgressView().controlSize(.small).tint(accent).frame(width: 22, height: 22)
         case .done: Image(systemName: "checkmark.circle.fill").foregroundStyle(accent).font(.title3)
         case .warning: Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange).font(.title3)
         case .stopped: Image(systemName: "stop.circle.fill").foregroundStyle(.secondary).font(.title3)
@@ -107,7 +124,7 @@ struct QRView: View {
     }
 }
 
-/// The Steam QR code with how to scan it (Steam sign-in for mods, the Halo 3 download, Repair game files).
+/// The Steam QR code with how to scan it for Halo 2 downloads and repairs.
 struct SignInCard: View {
     let qr: QRGrid?
     var onSkip: (() -> Void)?
@@ -119,7 +136,7 @@ struct SignInCard: View {
                     QRView(grid: qr).padding(8)
                 } else {
                     VStack(spacing: 8) {
-                        ProgressView().controlSize(.small)
+                        ProgressView().controlSize(.small).tint(accent)
                         Text("Getting a code…").font(.caption).foregroundStyle(.black.opacity(0.6))
                     }
                 }
@@ -158,7 +175,7 @@ struct ModRow: View {
                 Spacer()
                 if mod.isDownloading { Text("\(Int(mod.percent ?? 0))%").font(.caption.monospacedDigit()).foregroundStyle(.secondary) }
             }
-            if mod.isDownloading { ProgressView(value: mod.fraction).tint(accent) }
+            if mod.isDownloading { ProgressView(value: mod.fraction).progressViewStyle(AccentLinearProgressStyle(color: accent)) }
             Text(mod.detail).font(.caption).foregroundStyle(.secondary)
         }
     }
@@ -198,18 +215,10 @@ struct PlayButtonStyle: ButtonStyle {
 struct HelpPanel: View {
     @Binding var open: Bool
     private let items: [(game: String, help: String)] = [
-        ("Mod not downloaded… Start Steam and sign in",
-         "Expected on a Mac: the game can't use Steam itself, so this window downloads the mod instead. Wait until it says Ready under Mods, then press Try Again (or leave and rejoin)."),
-        ("The server runs an older version of Project Reclaimer",
-         "The server hasn't updated yet; you have the newest version. This window notices and offers \u{201C}Switch to (its version) and rejoin\u{201D}: one click, and the game restarts on that version and joins. Next time you open Project Reclaimer it's back on the newest."),
-        ("Public join timed out; check the server address and forwarded ports",
-         "That server didn't answer the join. Usually it runs an older Project Reclaimer (its card says \u{201C}This server runs an older version\u{201D}) or its port isn't open. This window asks the server which version it runs and offers to switch and rejoin when that's the problem; otherwise pick another server. If every server says this, quit the game and open Project Reclaimer again: it checks your Mac's network setup."),
-        ("Steam Workshop's version of a mod differs from the server's",
-         "The server uses an older copy of a mod than Steam has. Only the server's owner can fix it by updating the mod. Pick another server."),
-        ("This game is Halo 3: ODST, which isn't installed. Enable Halo 3: ODST in Steam…",
-         "On a Mac there's no Steam to enable it in: open Tools (the gear button) and, under Installed games, press Add next to Halo 3: ODST. It downloads ODST (about 9 GB) from your Steam copy of MCC. Then ODST's games join, and Campaign and Firefight in the game's menu have ODST too."),
-        ("Could not join that server (every server)",
-         "Quit the game and open Project Reclaimer again: it installs any fix it needs (it may ask for your Mac password)."),
+        ("Halo 2 content is missing",
+         "Project Gravemind needs both Halo 2 campaign and multiplayer files. Install or repair Halo 2 from Tools > Installed games, or verify Halo: The Master Chief Collection's files in Steam."),
+        ("A session does not appear in the browser",
+         "Check that the host and players use compatible Gravemind versions, and that the host's network allows UDP traffic on the game's session port."),
         ("Stuck on Synchronizing players",
          "Usually the server's fault. Leave and try another server."),
         ("Controller connected in Bluetooth, but the game ignores it",
@@ -264,11 +273,6 @@ struct ContentView: View {
                         .padding(.leading, 34)
                 }
                 Divider()
-                StepRow(title: "Steam (for Workshop mods)", step: m.steam)
-                if let network = m.network {
-                    Divider()
-                    StepRow(title: "Network setup", step: network)
-                }
                 if let controllers = m.controllers {
                     Divider()
                     StepRow(title: "Controller", step: controllers)
@@ -276,16 +280,6 @@ struct ContentView: View {
                 if let sound = m.sound {
                     Divider()
                     StepRow(title: "Sound", step: sound)
-                }
-                if m.signingIn { SignInCard(qr: m.qr, onSkip: m.skipSteam) }
-                if m.steamSlow {
-                    Button("Taking long? Skip for now") { m.skipSteam() }.buttonStyle(.link).font(.caption)
-                }
-                if case .failed = m.steam {
-                    HStack {
-                        Button("Try Again") { m.signIn() }.buttonStyle(.borderedProminent).tint(accent).controlSize(.large)
-                        Button("Skip for now") { m.skipSteam() }.buttonStyle(.link)
-                    }
                 }
             }
             .padding(16)
@@ -297,56 +291,19 @@ struct ContentView: View {
                         m.acceptLicense()
                     }
                     .buttonStyle(.borderedProminent).tint(accent).disabled(m.acceptingLicense)
-                    if m.acceptingLicense { ProgressView().controlSize(.small) }
+                    if m.acceptingLicense { ProgressView().controlSize(.small).tint(accent) }
                     Spacer()
                 }
             }
 
-            if let j = m.joinTrouble { JoinTroubleCard(m: m, j: j) }
-
-            if let s = m.startupRow {
-                StartupRow(display: s) { action in
-                    switch action {
-                    case .tryAgain: m.tryAgainAfterStall()
-                    case .forceQuit: m.startForceQuit()
-                    }
-                }
-            }
-
-            if m.playing {
-                Label {
-                    // (one literal: SwiftUI only applies the **bold** markup to a string literal)
-                    Text("If the game says a mod is **not downloaded** or asks you to **Start Steam**, that's expected: it's downloading here. When it says **Ready** below, press **Try Again** in the game.")
-                        .font(.callout).fixedSize(horizontal: false, vertical: true)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                } icon: {
-                    Image(systemName: "info.circle.fill").foregroundStyle(accent)
-                }
-                .padding(14)
-                .background(RoundedRectangle(cornerRadius: 12).fill(accent.opacity(0.12)))
-            }
-
-            if !m.mods.isEmpty {
-                VStack(alignment: .leading, spacing: 12) {
-                    Text("Mods").font(.headline)
-                    ForEach(m.mods) { ModRow(mod: $0) }
-                }
-                .padding(16)
-                .background(RoundedRectangle(cornerRadius: 14).fill(.background.secondary))
-            }
-
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Download a mod before joining (optional)").font(.caption).foregroundStyle(.secondary)
-                HStack {
-                    TextField("Paste a Steam Workshop link", text: $m.link)
-                        .textFieldStyle(.roundedBorder)
-                        .onSubmit { m.getMod() }
-                    Button("Download") { m.getMod() }.disabled(m.link.isEmpty)
-                }
-                if let e = m.linkError { Text(e).font(.caption).foregroundStyle(.red) }
-            }
-
             HelpPanel(open: $m.helpOpen)
+
+            HStack(spacing: 4) {
+                Text("Mac port based on")
+                Link("Project Reclaimer Mac Port", destination: URL(string: "https://github.com/mattromano/project-reclaimer-mac-port")!)
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
 
             if let e = m.gameError {
                 Label(e, systemImage: "exclamationmark.triangle.fill")
@@ -355,19 +312,6 @@ struct ContentView: View {
             if let n = m.notice {
                 Label(n, systemImage: "info.circle")
                     .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            }
-
-            // fit.py says this Mac is below the recommended memory: set the first start's expectation, without
-            // touching the Play button (the warning never gates playing).
-            if !m.playing, let note = m.memoryNotice {
-                Label {
-                    Text(note).font(.callout).fixedSize(horizontal: false, vertical: true)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                } icon: {
-                    Image(systemName: "memorychip").foregroundStyle(.orange)
-                }
-                .padding(14)
-                .background(RoundedRectangle(cornerRadius: 12).fill(Color.orange.opacity(0.12)))
             }
 
             Button(action: installing ? { m.showInstallGames = true } : m.play) {
@@ -384,19 +328,18 @@ struct ContentView: View {
         .sheet(isPresented: $m.showController) { ControllerSheet(launcher: m) }
     }
 
-    /// Halo 3 was removed in Tools: the Play button installs it instead.
-    private var installing: Bool { m.halo3Missing && !m.playing }
+    /// Halo 2 was removed in Tools: the Play button opens the install sheet instead.
+    private var installing: Bool { m.halo2Missing && !m.playing }
 
     private var playLabel: String {
         if m.playing { return "Playing" }
-        if m.ready { return installing ? "Install Halo 3…" : "Play" }
-        if m.signingIn { return "Scan the code above to continue" }
-        if case .failed = m.steam { return "Try again or skip Steam above" }
+        if m.ready { return installing ? "Install Halo 2…" : "Play" }
+        if installing { return "Install Halo 2…" }
         return "Getting ready…"
     }
 
     private var header: some View {
-        AppHeader(subtitle: m.playing ? "Have fun! This window shows mod downloads while you play." : "Halo 3 on your Mac") {
+        AppHeader(subtitle: m.playing ? "Project Gravemind is running." : "Halo 2 on your Mac") {
             Button { m.showController = true } label: {
                 Label("Controller", systemImage: "gamecontroller").labelStyle(.titleAndIcon)
             }
@@ -437,7 +380,7 @@ struct JoinTroubleCard: View {
                      : "The game restarts on that version and joins the server. Next time you open Project Reclaimer it's back on the newest.")
                     .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
-            if j.asking { HStack { ProgressView().controlSize(.small); Text("Asking the server which version it runs…").font(.caption) } }
+            if j.asking { HStack { ProgressView().controlSize(.small).tint(accent); Text("Asking the server which version it runs…").font(.caption) } }
         }
         .padding(14)
         .background(RoundedRectangle(cornerRadius: 12).fill(Color.orange.opacity(0.12)))
@@ -464,7 +407,7 @@ struct AppHeader<Trailing: View>: View {
             Image(nsImage: NSApp?.applicationIconImage ?? NSImage(named: NSImage.applicationIconName) ?? NSImage())
                 .resizable().frame(width: 56, height: 56).clipShape(RoundedRectangle(cornerRadius: 12))
             VStack(alignment: .leading, spacing: 2) {
-                Text("Project Reclaimer").font(.title.bold()).fixedSize()
+                Text("Project Gravemind").font(.title.bold()).fixedSize()
                 Text(subtitle).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: 12)

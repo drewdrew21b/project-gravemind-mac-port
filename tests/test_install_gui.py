@@ -42,14 +42,23 @@ class InstallGuiTest(unittest.TestCase):
         self.assertNotEqual(rc, 0)
         self.assertEqual(errors, ["error: This needs an Apple Silicon Mac (M1 or newer)."])
 
-    def test_odst_needs_more_free_space(self):
+    def test_halo2_needs_more_free_space(self):
         self.fake("df", 'echo "Filesystem 1G-blocks Used Available"; echo "/dev/disk3 900 850 50"')
         self.fake("curl", "exit 6")  # (past the free-space check, the install stops at its first download)
         rc, errors = self.run_install(RECLAIMER_MCC_FROM="")
-        self.assertNotIn("free disk space", " ".join(errors))  # Halo 3 alone fits in 50 GB
-        rc, errors = self.run_install(RECLAIMER_MCC_FROM="", RECLAIMER_ODST="1")
         self.assertNotEqual(rc, 0)
-        self.assertEqual(errors, ["error: Need about 54 GB free disk space (have 50 GB)."])
+        self.assertEqual(errors, ["error: Need about 82 GB free disk space (have 50 GB)."])
+
+    def test_campaign_only_install_only_needs_space_for_multiplayer(self):
+        self.fake("df", 'echo "Filesystem 1G-blocks Used Available"; echo "/dev/disk3 900 865 35"')
+        self.fake("curl", "exit 6")
+        paks = (self.tmp / "home" / "prefix-wine/drive_c/Program Files (x86)/Steam/steamapps/common"
+                / "Halo The Master Chief Collection" / "halo2" / "preload" / "paks")
+        paks.mkdir(parents=True)
+        (paks / "campaign.pck").write_bytes(b"campaign")
+        rc, errors = self.run_install(RECLAIMER_MCC_FROM="")
+        self.assertNotEqual(rc, 0)
+        self.assertFalse(any("free disk space" in error for error in errors), errors)
 
     def test_unaccepted_xcode_license_says_so(self):
         # /usr/bin/python3 refuses to run until Xcode's license is accepted; the install then failed much later
@@ -96,7 +105,7 @@ class UninstallTest(unittest.TestCase):
         p = subprocess.run(["/bin/bash", str(REPO / "uninstall.sh")], env=env, stdin=subprocess.DEVNULL,
                            capture_output=True, text=True, timeout=30)
         self.assertNotEqual(p.returncode, 0)
-        self.assertIn("doesn't look like a Project Reclaimer install", p.stderr)
+        self.assertIn("doesn't look like a Project Gravemind install", p.stderr)
         self.assertEqual((tmp / "notes.txt").read_text(), "keep me")
 
     def test_downloads_stay_on_https(self):

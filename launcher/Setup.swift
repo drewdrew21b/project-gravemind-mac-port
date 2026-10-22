@@ -1,6 +1,6 @@
 // First install and the one-time upgrade of a 1.0 install, in the window instead of Terminal. Runs the same
 // install.sh as the Terminal line (fetched from GitHub at one commit) in its GUI mode, and shows its steps, the Steam
-// QR code and the Halo 3 download's progress.
+// QR code and the Halo 2 download's progress.
 import AppKit
 import SwiftUI
 
@@ -27,9 +27,6 @@ final class SetupModel: ObservableObject {
     @Published var remaining: String?
     @Published var qr: QRGrid?
     @Published var status: String?   // e.g. "Signed in to Steam. Getting the file list…"
-    @Published var offersODST = false  // only while the big download is still ahead
-    /// Also download Halo 3: ODST (~9 GB): Project Reclaimer 0.9.19+ plays its campaign and Firefight.
-    @Published var withODST = false { didSet { if withODST != oldValue { runChecks() } } }
     var installing: Bool { phase == .installing }
     private var awake: NSObjectProtocol?
 
@@ -38,7 +35,7 @@ final class SetupModel: ObservableObject {
     private var installer: LineProcess?
     private var lastError: String?
     private var started = false
-    var neededGB: Double { withODST ? 54 : 45 }
+    var neededGB: Double { halo2RequiredFreeGB(in: mccFolder) }
 
     init(upgrading: Bool) { self.upgrading = upgrading }
 
@@ -82,22 +79,15 @@ final class SetupModel: ObservableObject {
         var list: [Check] = []
         let v = ProcessInfo.processInfo.operatingSystemVersion
         list.append(Check(id: "mac", title: "Apple Silicon Mac, macOS \(v.majorVersion)", ok: true, detail: ""))
-        // (only when it's below what Project Reclaimer recommends: an informational note, never a blocker)
-        let memory = ProcessInfo.processInfo.physicalMemory
-        if isConstrainedMemory(memory) {
-            let ram = memoryGigabytes(memory)
-            list.append(Check(id: "memory", title: "Memory: \(ram) GB", ok: nil,
-                              detail: "Project Reclaimer recommends 16 GB. With \(ram) GB the game's first start can sit on \"Building Asset Library\" for a long time, and it may not finish. You can still install."))
-        }
-        let halo = home.appendingPathComponent(
-            "prefix-wine/drive_c/Program Files (x86)/Steam/steamapps/common/Halo The Master Chief Collection/halo3/halo3.dll")
-        let copying = ProcessInfo.processInfo.environment["RECLAIMER_MCC_FROM"] != nil  // (install.sh skips it too)
-        offersODST = !upgrading && !copying && !FileManager.default.fileExists(atPath: halo.path)
-        if offersODST {  // (no big download left otherwise)
+        let mcc = home.appendingPathComponent(
+            "prefix-wine/drive_c/Program Files (x86)/Steam/steamapps/common/Halo The Master Chief Collection")
+        let copying = ProcessInfo.processInfo.environment["RECLAIMER_MCC_FROM"]?.isEmpty == false
+        let installed = halo2FilesPresent(in: mcc)
+        if !upgrading && !copying && !installed {
             let free = freeGigabytes()
             list.append(Check(id: "disk", title: "Free disk space: \(Int(free)) GB", ok: free >= neededGB,
                               detail: free >= neededGB ? "" :
-                                "\(withODST ? "Halo 3 and ODST need" : "Halo 3 needs") about \(Int(neededGB)) GB. Free up \(Int((neededGB - free).rounded(.up))) GB (empty the Trash, delete big downloads), then press Check Again."))
+                                "The missing Halo 2 files need about \(Int(neededGB)) GB. Free up \(Int((neededGB - free).rounded(.up))) GB (empty the Trash, delete big downloads), then press Check Again."))
         }
         let tools = devToolsState
         needsDevTools = tools == .missing
@@ -165,25 +155,28 @@ final class SetupModel: ObservableObject {
         qr = nil
         status = nil
         lastError = nil
-        log("installing\(withODST ? " with ODST" : "")")
-        // a 35 GB download: the Mac must not fall asleep on it (the screen may)
+        log("installing")
+        // The Mac must not fall asleep during the game download (the screen may).
         awake = ProcessInfo.processInfo.beginActivity(options: [.idleSystemSleepDisabled, .userInitiated],
-                                                      reason: "Installing Project Reclaimer")
+                                                      reason: "Installing Project Gravemind")
         setCloseButton(enabled: false)  // (Cmd-Q asks first; see AppDelegate)
         // the installer from GitHub, pinned to main's current commit so every file it fetches matches
         let bootstrap = """
+                        if [ -f "${RECLAIMER_BUNDLED_INSTALLER:-}" ]; then
+                            RECLAIMER_GUI=1 exec /bin/bash "$RECLAIMER_BUNDLED_INSTALLER"
+                        fi
             raw=${RECLAIMER_REPO_RAW:-}
             if [ -z "$raw" ]; then
               sha=$(/usr/bin/curl -fsS --proto =https --connect-timeout 15 -H 'Accept: application/vnd.github.sha' \\
-                https://api.github.com/repos/mattromano/project-reclaimer-mac-port/commits/main 2>/dev/null)
+                https://api.github.com/repos/drewdrew21b/project-gravemind-mac-port/commits/main 2>/dev/null)
               case "$sha" in *[!0-9a-f]*|'') sha=main ;; esac
-              raw=https://raw.githubusercontent.com/mattromano/project-reclaimer-mac-port/$sha
+              raw=https://raw.githubusercontent.com/drewdrew21b/project-gravemind-mac-port/$sha
             fi
             f=$(/usr/bin/mktemp "${TMPDIR:-/tmp}/project-reclaimer-install.XXXXXX") ||
               { echo "error: Couldn't make a temporary file for the installer."; exit 1; }
             /usr/bin/curl -fsSL --proto =https --proto-redir =https --connect-timeout 20 --speed-limit 1024 --speed-time 60 "$raw/install.sh" -o "$f" ||
               { echo "error: Couldn't download the installer. Check your internet connection and try again."; exit 1; }
-            RECLAIMER_REPO_RAW="$raw" RECLAIMER_GUI=1 \(withODST && offersODST ? "RECLAIMER_ODST=1 " : "")exec /bin/bash "$f"
+            RECLAIMER_REPO_RAW="$raw" RECLAIMER_GUI=1 exec /bin/bash "$f"
             """
         installer = LineProcess("/bin/bash", ["-c", bootstrap], onLine: { [self] line in
             switch SetupEvent(line: line) {
@@ -223,7 +216,7 @@ final class SetupModel: ObservableObject {
                 phase = .done
                 // a disk image copy that was dragged somewhere would show up twice in Spotlight: the installed app
                 // in ~/Applications is the one that updates itself (a copy still on the disk image can't be moved)
-                if !isInstalledApp, Bundle.main.bundleIdentifier == "local.projectreclaimer.setup",
+                if !isInstalledApp, Bundle.main.bundleIdentifier == "local.projectgravemind.setup",
                    Bundle.main.bundleURL.pathExtension == "app", !Bundle.main.bundlePath.hasPrefix("/Volumes/"),
                    Bundle.main.bundleURL.standardizedFileURL != installedAppURL.standardizedFileURL {
                     try? FileManager.default.trashItem(at: Bundle.main.bundleURL, resultingItemURL: nil)
@@ -249,7 +242,7 @@ struct SetupView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
-            AppHeader(subtitle: m.upgrading ? "A one-time upgrade to the new version" : "Let's get Halo 3 running on your Mac")
+            AppHeader(subtitle: m.upgrading ? "A one-time upgrade to the new version" : "Let's get Halo 2 running on your Mac")
             switch m.phase {
             case .checking, .blocked, .ready: checklist
             case .installing, .failed, .done: progressList
@@ -283,7 +276,7 @@ struct SetupView: View {
                             m.installDevTools()
                         }
                         .buttonStyle(.borderedProminent).tint(accent).disabled(m.waitingForDevTools)
-                        if m.waitingForDevTools { ProgressView().controlSize(.small) }
+                        if m.waitingForDevTools { ProgressView().controlSize(.small).tint(accent) }
                     }
                 }
                 if m.needsLicense {
@@ -292,14 +285,8 @@ struct SetupView: View {
                             m.acceptLicense()
                         }
                         .buttonStyle(.borderedProminent).tint(accent).disabled(m.acceptingLicense)
-                        if m.acceptingLicense { ProgressView().controlSize(.small) }
+                        if m.acceptingLicense { ProgressView().controlSize(.small).tint(accent) }
                     }
-                }
-                if m.offersODST {
-                    Divider()
-                    Text("Games to download").font(.headline)
-                    GameChecklist(halo3Size: "About 35 GB", odstSize: "About 9 GB more", odst: $m.withODST,
-                                  odstNote: "For ODST's campaign, Firefight and co-op. You can add it later in Tools too.")
                 }
                 if m.phase == .blocked {
                     Button("Check Again") { m.runChecks() }.disabled(m.waitingForDevTools)
@@ -311,8 +298,8 @@ struct SetupView: View {
 
             Label {
                 Text(m.upgrading
-                     ? "Keeps your Halo 3 files, mods and settings. Takes a minute or two, and macOS may ask for your Mac password."
-                     : "You'll need the **Steam app on your phone** (you scan a code with it, to download Halo 3 from your own account) and your **Mac password**. The download is about \(m.withODST ? 44 : 35) GB, so it can take a while: leave this window open (your Mac won't go to sleep meanwhile).")
+                     ? "Keeps your Halo 2 files and settings. Takes a minute or two."
+                     : "You'll need the **Steam app on your phone** (scan a code to download Halo 2 from your own account) and your **Mac password**. The campaign, multiplayer and MCC shared files total about 78 GB, so it can take a while: leave this window open (your Mac won't go to sleep meanwhile).")
                     .font(.callout).fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
             } icon: { Image(systemName: "info.circle.fill").foregroundStyle(accent) }
@@ -336,7 +323,7 @@ struct SetupView: View {
                     let current = i == m.steps.count - 1 && m.phase == .installing
                     HStack(alignment: .top, spacing: 12) {
                         Group {
-                            if current { ProgressView().controlSize(.small) }
+                            if current { ProgressView().controlSize(.small).tint(accent) }
                             else if i == m.steps.count - 1, case .failed = m.phase {
                                 Image(systemName: "xmark.circle.fill").foregroundStyle(.red)
                             } else { Image(systemName: "checkmark.circle.fill").foregroundStyle(accent) }
@@ -346,7 +333,7 @@ struct SetupView: View {
                             Text(title).font(current ? .headline : .body)
                             if current, let s = m.status { Text(s).font(.callout).foregroundStyle(.secondary) }
                             if current, let p = m.progress {
-                                ProgressView(value: p).tint(accent)
+                                ProgressView(value: p).progressViewStyle(AccentLinearProgressStyle(color: accent))
                                 Text("\(Int(p * 100))%" + (m.remaining.map { " · \($0)" } ?? ""))
                                     .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
                             }
@@ -357,7 +344,7 @@ struct SetupView: View {
                     }
                 }
                 if m.steps.isEmpty, m.phase == .installing {
-                    HStack(spacing: 12) { ProgressView().controlSize(.small); Text("Starting…") }
+                    HStack(spacing: 12) { ProgressView().controlSize(.small).tint(accent); Text("Starting…") }
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -372,7 +359,7 @@ struct SetupView: View {
                     .buttonStyle(PlayButtonStyle())
                 Text("It picks up where it stopped.").font(.caption).foregroundStyle(.secondary)
             case .done:
-                Label("All set! Opening Project Reclaimer…", systemImage: "checkmark.seal.fill")
+                Label("All set! Opening Project Gravemind…", systemImage: "checkmark.seal.fill")
                     .font(.headline).foregroundStyle(accent)
                 if !isInstalledApp {
                     Text("It's in your Applications folder now, so you can eject the disk image and move it to the Trash.")

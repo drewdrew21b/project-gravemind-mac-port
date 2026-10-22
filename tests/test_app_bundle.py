@@ -1,4 +1,4 @@
-"""The installed app bundle (scripts/make_app.sh) and the startup task's address ranges.
+"""The installed Gravemind app bundle (scripts/make_app.sh).
 
 make_app.sh builds into a throwaway apps folder (RECLAIMER_APPS_DIR), never ~/Applications.
 Run: /usr/bin/python3 -I -m unittest discover -s tests
@@ -21,7 +21,8 @@ class AppBundleTest(unittest.TestCase):
         self.tmp = Path(tempfile.mkdtemp())
         (self.tmp / "home" / "tools").mkdir(parents=True)
         shutil.copy(REPO / "launcher" / "ProjectReclaimer", self.tmp / "home" / "tools" / "ProjectReclaimer")
-        self.app = self.tmp / "apps" / "Project Reclaimer.app"
+        shutil.copy(REPO / "launcher" / "Resources" / "AppIcon.icns", self.tmp / "home" / "tools" / "AppIcon.icns")
+        self.app = self.tmp / "apps" / "Project Gravemind.app"
 
     def tearDown(self):
         subprocess.run([LSREGISTER, "-u", str(self.app)], capture_output=True)
@@ -31,20 +32,21 @@ class AppBundleTest(unittest.TestCase):
         # without a usage description macOS never prompts: the game (started by the app) silently gets silence
         env = dict(os.environ, RECLAIMER_HOME=str(self.tmp / "home"), RECLAIMER_APPS_DIR=str(self.tmp / "apps"))
         env.pop("RECLAIMER_APP_PATH", None)
-        subprocess.run(["/bin/bash", str(REPO / "scripts" / "make_app.sh"), "Project Reclaimer", "9.9.9"], env=env,
+        subprocess.run(["/bin/bash", str(REPO / "scripts" / "make_app.sh"), "Project Gravemind", "9.9.9"], env=env,
                        check=True, capture_output=True, timeout=60)
         info = plistlib.loads((self.app / "Contents" / "Info.plist").read_bytes())
         self.assertIn("voice chat", info.get("NSMicrophoneUsageDescription", ""))
+        self.assertEqual((self.app / "Contents" / "Resources" / "AppIcon.icns").read_bytes(),
+                 (self.tmp / "home" / "tools" / "AppIcon.icns").read_bytes())
         self.assertEqual(subprocess.run(["codesign", "-v", str(self.app)], capture_output=True).returncode, 0)
 
 
-class LoopbackRangesTest(unittest.TestCase):
-    def test_startup_task_covers_the_ranges_releases_bind(self):
-        # 127.3.2.x: 0.9.13 bound there and every join was refused until it was added (GitHub issue #3)
-        text = (REPO / "scripts" / "reclaimer-loopback.sh").read_text()
-        prefixes = text.split("for p in ", 1)[1].split("; do", 1)[0].split()
-        for p in ("127.0.0", "127.0.1", "127.0.2", "127.3.1", "127.3.2"):
-            self.assertIn(p, prefixes)
+class LegacyNetworkFilesTest(unittest.TestCase):
+    def test_gravemind_install_does_not_ship_reclaimer_loopback_files(self):
+        self.assertFalse((REPO / "scripts" / "reclaimer-loopback.sh").exists())
+        self.assertFalse((REPO / "scripts" / "local.projectreclaimer.loopback.plist").exists())
+        for path in (REPO / "install.sh", REPO / "scripts" / "tools.py"):
+            self.assertNotIn("reclaimer-loopback.sh", path.read_text())
 
 
 if __name__ == "__main__":
