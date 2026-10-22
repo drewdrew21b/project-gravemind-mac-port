@@ -20,7 +20,10 @@ What actually failed is the **watchdog**, and it failed in a way that is measura
 an *in-flight update* against the age of the **launcher process**, not against when the update started. An update
 started ten minutes into a session is therefore killed on the next tick; a long update gets at most ten minutes from
 launch. And because the check lives on a 1 s `Timer` with no activity assertion, macOS sleep or App Nap can stop it
-firing entirely — which is the only way to explain a 1 h 45 min gap when the timer was supposed to fire at ten minutes.
+firing entirely. That is the most likely explanation for a 1 h 45 min gap when the timer was supposed to fire at ten
+minutes, but it is unconfirmed. A second possibility stays open: the watchdog's `stop()` only terminates the Python
+updater (`process.terminate()`), not its child `install.sh` or `curl`, so an install can keep running and writing after
+the window says it stopped. Both need checking before the fix is called done.
 
 ## Solution
 
