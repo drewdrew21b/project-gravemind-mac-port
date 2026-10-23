@@ -290,17 +290,42 @@ func renderStates(to dir: URL) {
     if let icon, let img = NSImage(contentsOf: icon) { NSApp.applicationIconImage = img }
     try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
     let now = Date().timeIntervalSince1970
+    let upToDateStatus = "Mac port 0.8.3: up to date; Project Gravemind 0.18.412: up to date"
+    let updatedStatus = "Mac port 0.8.3: up to date; Project Gravemind 0.18.412: updated"
+    let populateVersionedUpdates: (Launcher) -> Void = { m in
+        guard case .waiting = m.applicationUpdate, case .waiting = m.gravemindUpdate else { return }
+        switch m.update {
+        case .done(let summary):
+            m.applicationUpdate = .done("0.8.3: up to date")
+            let gameStatus = summary.contains("0.18.373") ? "0.18.373: selected for this session"
+                : summary.localizedCaseInsensitiveContains("updated") ? "0.18.412: updated"
+                : "0.18.412: up to date"
+            m.gravemindUpdate = .done(gameStatus)
+        case .warning(let message):
+            m.applicationUpdate = .warning(message)
+            m.gravemindUpdate = .warning(message)
+        default: break
+        }
+    }
     let qrRows = (try? String(contentsOfFile: CommandLine.arguments.last ?? "", encoding: .utf8))?
         .split(separator: "\n").compactMap { $0.hasPrefix("qr: ") ? String($0.dropFirst(4)) : nil } ?? []
     let states: [(String, (Launcher) -> Void)] = [
-        ("1-checking", { $0.update = .working("Checking for updates…") }),
-        ("2-updating-game", { $0.update = .working("Updating Project Gravemind to 0.18.374…"); $0.updateProgress = 0.42 }),
+        ("1-checking", {
+            $0.update = .working("Checking for updates…")
+            $0.applicationUpdate = .working("Checking for updates…")
+        }),
+        ("2-updating-game", {
+            $0.update = .working("Updating Project Gravemind to 0.18.374…")
+            $0.applicationUpdate = .done("0.8.3: up to date")
+            $0.gravemindUpdate = .working("Updating to 0.18.374…")
+            $0.gravemindUpdateProgress = 0.42
+        }),
         ("3-steam-qr", {
-            $0.update = .done("Up to date"); $0.steam = .working("Sign in to Steam so mods download fast")
+            $0.update = .done(upToDateStatus); $0.steam = .working("Sign in to Steam so mods download fast")
             $0.signingIn = true; $0.qr = QRGrid(rows: qrRows)
         }),
-        ("4-steam-failed", { $0.update = .done("Up to date"); $0.steam = .failed("Sign-in didn't finish (Expired).") }),
-        ("5-ready", { $0.update = .done("Updated to the latest version"); $0.steam = .done("Signed in as player123") }),
+        ("4-steam-failed", { $0.update = .done(upToDateStatus); $0.steam = .failed("Sign-in didn't finish (Expired).") }),
+        ("5-ready", { $0.update = .done(updatedStatus); $0.steam = .done("Signed in as player123") }),
         ("5-license", {
             $0.needsLicense = true
             $0.update = .warning("Xcode's license hasn't been accepted (an Xcode update asks again), so Project "
@@ -312,7 +337,7 @@ func renderStates(to dir: URL) {
             $0.steam = .warning("Can't reach Steam right now. Mods may download slowly from game servers.")
         }),
         ("7-playing-mods", {
-            $0.update = .done("Up to date"); $0.steam = .done("Signed in as player123"); $0.playing = true
+            $0.update = .done(upToDateStatus); $0.steam = .done("Signed in as player123"); $0.playing = true
             $0.mods = [
                 ModStatus(id: "1", title: "Warlock", state: "downloading", percent: 68.7, bytes_total: 1_600_000_000, time: now),
                 ModStatus(id: "2", title: "Lockout", state: "ready", percent: 100, hint: "Press Try Again in the game.", time: now - 1),
@@ -321,47 +346,47 @@ func renderStates(to dir: URL) {
             ]
         }),
         ("7b-startup-building", {
-            $0.update = .done("Up to date"); $0.steam = .done("Signed in as player123"); $0.playing = true
+            $0.update = .done(upToDateStatus); $0.steam = .done("Signed in as player123"); $0.playing = true
             $0.startup = startupDisplay(state: "building", elapsed: 132)
         }),
         ("7c-startup-stalled", {
-            $0.update = .done("Up to date"); $0.steam = .done("Signed in as player123"); $0.playing = true
+            $0.update = .done(upToDateStatus); $0.steam = .done("Signed in as player123"); $0.playing = true
             $0.startup = startupDisplay(state: "stalled", elapsed: 240, tier: .constrained)
         }),
         ("9-game-closed", {
-            $0.update = .done("Up to date"); $0.steam = .done("Signed in as player123")
+            $0.update = .done(upToDateStatus); $0.steam = .done("Signed in as player123")
             $0.gameError = "The game closed right after starting. Press Play to try again. If it keeps happening, "
                 + "send ~/Games/ProjectGravemind/logs/client-wine.log to whoever set this up for you."
         }),
         ("10-steam-slow", {
-            $0.update = .done("Up to date"); $0.steam = .working("Checking your Steam sign-in…"); $0.steamSlow = true
+            $0.update = .done(upToDateStatus); $0.steam = .working("Checking your Steam sign-in…"); $0.steamSlow = true
         }),
         ("11-help", {
-            $0.update = .done("Up to date"); $0.steam = .done("Signed in as player123"); $0.playing = true
+            $0.update = .done(upToDateStatus); $0.steam = .done("Signed in as player123"); $0.playing = true
             $0.helpOpen = true
         }),
         ("13-crash", {
-            $0.update = .done("Up to date"); $0.steam = .done("Signed in as player123")
+            $0.update = .done(upToDateStatus); $0.steam = .done("Signed in as player123")
             $0.gameError = "The graphics card stopped responding, so the game closed. This happens now and then on heavy modded maps. Press Play to start again; if it keeps happening, lower Settings > Render resolution in the game."
         }),
         ("14-controller-stuck", {
-            $0.update = .done("Up to date"); $0.steam = .done("Signed in as player123")
+            $0.update = .done(upToDateStatus); $0.steam = .done("Signed in as player123")
             $0.controllers = .warning("Your Mac's game controller service is stuck, so the game won't see a controller. "
                                       + "Restart your Mac to fix it (Apple menu > Restart). Keyboard and mouse still work.")
         }),
         ("15-sound-muted", {
-            $0.update = .done("Up to date"); $0.steam = .done("Signed in as player123")
+            $0.update = .done(upToDateStatus); $0.steam = .done("Signed in as player123")
             $0.sound = .warning("Your Mac's sound goes to MacBook Pro Speakers, which is muted, so the game will be silent. "
                                 + "Un-mute it (or pick your headphones) in the Sound menu before you press Play: the game "
                                 + "keeps the sound output it starts with.")
         }),
         ("16-sound-headset", {
-            $0.update = .done("Up to date"); $0.steam = .done("Signed in as player123")
+            $0.update = .done(upToDateStatus); $0.steam = .done("Signed in as player123")
             $0.sound = .done("MacBook Pro Speakers. To hear the game in AirPods Pro instead, pick it in the Sound menu "
                              + "before you press Play: the game keeps the sound output it starts with.")
         }),
         ("8-bad-link", {
-            $0.update = .done("Up to date"); $0.steam = .done("Signed in as player123")
+            $0.update = .done(upToDateStatus); $0.steam = .done("Signed in as player123")
             $0.link = "Warlock"; $0.linkError = "Paste a Steam Workshop link (it has “?id=” in it)."
         }),
     ]
@@ -369,6 +394,7 @@ func renderStates(to dir: URL) {
         let m = Launcher()
         m.logging = false
         setup(m)
+        populateVersionedUpdates(m)
         snapshot(ContentView(m: m), name: name, to: dir)
     }
 
@@ -462,13 +488,14 @@ func renderStates(to dir: URL) {
     // Halo 2 removed in Tools: the main window's Install Halo 2 action.
     let r = Launcher()
     r.logging = false
-    r.update = .done("Up to date"); r.steam = .done("Signed in as player123")
+    r.update = .done(upToDateStatus); r.steam = .done("Signed in as player123")
     r.halo2Missing = true
     r.tools.freeBytes = 54_000_000_000
     r.tools.games = [GameItem(id: "halo2", title: "Halo 2", installed: false, bytes: 0, path: halo2Path)]
     r.tools.say("Halo 2 was removed. Press Install Halo 2 in the main window to play again.")
     snapshot(ToolsSheet(launcher: r, t: r.tools), name: "30-tools-no-halo2", to: dir)
     r.tools.result = nil
+    populateVersionedUpdates(r)
     snapshot(ContentView(m: r), name: "35-install-halo2", to: dir)
     snapshot(InstallGamesSheet(m: r, t: r.tools), name: "36-install-halo2", to: dir)
 
@@ -478,6 +505,7 @@ func renderStates(to dir: URL) {
     v.update = .done("Playing Project Gravemind 0.18.373")
     v.steam = .done("Signed in as player123")
     v.chosenVersion = "0.9.11"
+    populateVersionedUpdates(v)
     snapshot(ContentView(m: v), name: "31-older-version", to: dir)
     v.tools.showVersions = true
     let today = ISO8601DateFormatter().string(from: Date()).prefix(10)
@@ -492,9 +520,10 @@ func renderStates(to dir: URL) {
     // a failed join: older server, and a server that didn't answer
     let jt = Launcher()
     jt.logging = false
-    jt.update = .done("Up to date"); jt.steam = .done("Signed in as player123"); jt.playing = true
+    jt.update = .done(upToDateStatus); jt.steam = .done("Signed in as player123"); jt.playing = true
     jt.joinTrouble = .init(address: "75.98.127.226:49241", serverName: "Official Star Wars 24/7 Server",
                            serverVersion: "0.9.11", mine: "0.9.13")
+    populateVersionedUpdates(jt)
     snapshot(ContentView(m: jt), name: "33-join-older-server", to: dir)
     jt.joinTrouble = .init(address: "108.28.165.49:49176", mine: "0.9.13", unreachable: true)
     snapshot(ContentView(m: jt), name: "34-join-no-answer", to: dir)

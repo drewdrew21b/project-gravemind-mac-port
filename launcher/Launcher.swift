@@ -9,13 +9,21 @@ enum Step: Equatable {
     case waiting, working(String), done(String), warning(String), failed(String)
     var finished: Bool { if case .waiting = self { return false }; if case .working = self { return false }; return true }
     var isWarning: Bool { if case .warning = self { return true }; return false }
+    var isDone: Bool { if case .done = self { return true }; return false }
 }
 
 @MainActor
 final class Launcher: ObservableObject {
     // state changes go to logs/launcher.log, so a friend's problem can be read from one file
     @Published var update: Step = .waiting { didSet { if update != oldValue { log("update: \(update)") } } }
-    @Published var updateProgress: Double?
+    @Published var applicationUpdate: Step = .waiting {
+        didSet { if applicationUpdate != oldValue { log("application update: \(applicationUpdate)") } }
+    }
+    @Published var applicationUpdateProgress: Double?
+    @Published var gravemindUpdate: Step = .waiting {
+        didSet { if gravemindUpdate != oldValue { log("Gravemind update: \(gravemindUpdate)") } }
+    }
+    @Published var gravemindUpdateProgress: Double?
     @Published var steam: Step = .waiting { didSet { if steam != oldValue { log("steam: \(steam)") } } }
     @Published var signingIn = false { didSet { if signingIn != oldValue { log("signing in: \(signingIn)") } } }
     @Published var qr: QRGrid? { didSet { if (qr == nil) != (oldValue == nil) { log("qr code shown: \(qr != nil)") } } }
@@ -108,6 +116,15 @@ final class Launcher: ObservableObject {
     private var helperRunning = false
     private var gameGoneSince: Date?
     private var windowless = WindowlessGame()  // a game that quit but left Wine running
+
+    private var installedApplicationVersion: String {
+        ((try? String(contentsOf: home.appendingPathComponent("version"), encoding: .utf8)) ?? "unknown")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+    private var installedGravemindVersion: String {
+        ((try? String(contentsOf: gameDir.appendingPathComponent("gravemind/.release-version"), encoding: .utf8))
+            ?? "unknown").trimmingCharacters(in: .whitespacesAndNewlines)
+    }
     private var startupPoll: LineProcess?      // `tools.py startup-state` while a game starts (one at a time)
     private var startupPollSince: Date?
     private var startupAnswer = ""             // the JSON line that poll printed
@@ -175,6 +192,8 @@ final class Launcher: ObservableObject {
                 playing = true
                 playedAt = .distantPast
                 update = .done("Checked when the game started")
+                applicationUpdate = .done("Installed \(installedApplicationVersion); check skipped while the game is running.")
+                gravemindUpdate = .done("Installed \(installedGravemindVersion); check skipped while the game is running.")
                 checkSteam()
             } else {
                 checkDevTools { [self] state in
@@ -184,6 +203,8 @@ final class Launcher: ObservableObject {
                         return
                     }
                     needsLicense = true
+                    applicationUpdate = .warning("Installed \(installedApplicationVersion); accept Xcode's license to check.")
+                    gravemindUpdate = .warning("Installed \(installedGravemindVersion); waiting for the application check.")
                     update = .warning("Xcode's license hasn't been accepted (an Xcode update asks again), so Project "
                                     + "Gravemind can't check for updates. Press Accept below: "
                                       + "macOS asks for your password.")
@@ -275,17 +296,55 @@ final class Launcher: ObservableObject {
         updateActivity = nil
     }
 
+    private func setUpdateStep(_ component: UpdateComponent, _ step: Step) {
+        switch component {
+        case .application: applicationUpdate = step
+        case .gravemind: gravemindUpdate = step
+        }
+    }
+
+    private func setUpdateProgress(_ component: UpdateComponent, _ progress: Double?) {
+        switch component {
+        case .application: applicationUpdateProgress = progress
+        case .gravemind: gravemindUpdateProgress = progress
+        }
+    }
+
+    private func warnActiveUpdates(_ reason: String) {
+        if case .working = applicationUpdate {
+            applicationUpdate = .warning("Installed \(installedApplicationVersion); \(reason)")
+        }
+        if case .working = gravemindUpdate {
+            gravemindUpdate = .warning("Installed \(installedGravemindVersion); \(reason)")
+        }
+    }
+
     private func runUpdate() {
         // right after restarting for a Mac port update, only the game is checked: never restart twice in a row
         let relaunched = CommandLine.arguments.contains("--relaunched")
         update = .working("Checking for updates…")
+        applicationUpdate = .working("Checking for updates…")
+        applicationUpdateProgress = nil
+        gravemindUpdate = .waiting
+        gravemindUpdateProgress = nil
         updateStartedAt = Date()
         updateActivity = ProcessInfo.processInfo.beginActivity(options: .userInitiated,
                                                                reason: "Updating Project Gravemind")
         updater = python("updater.py", [relaunched ? "game" : "run"], onLine: { [self] line in
             switch UpdaterEvent(line: line) {
-            case .status(let s): update = .working(s); updateProgress = nil
-            case .progress(let v): updateProgress = v
+            case .status(let s): update = .working(s)
+            case .progress(let v): gravemindUpdateProgress = v
+            case .componentStatus(let component, let s):
+                setUpdateStep(component, .working(s))
+                setUpdateProgress(component, nil)
+            case .componentProgress(let component, let v): setUpdateProgress(component, v)
+            case .componentDone(let component, let s):
+                setUpdateStep(component, .done(s))
+                setUpdateProgress(component, nil)
+            case .componentError(let component, let s):
+                let installedVersion = component == .application ? installedApplicationVersion : installedGravemindVersion
+                setUpdateStep(component, .warning("Installed \(installedVersion); \(s)"))
+                setUpdateProgress(component, nil)
             case .relaunch: relaunchRequested = true
             case .done(let s) where s.hasPrefix("using "):
                 chosenVersion = String(s.dropFirst(6))
@@ -294,22 +353,29 @@ final class Launcher: ObservableObject {
                 chosenVersion = nil
                 update = .done(s == "updated" ? "Updated to the latest version"
                                : s == "up to date" ? "Up to date" : s.prefix(1).uppercased() + s.dropFirst())
-            case .offline: update = .warning("Couldn't check for updates right now. You can still play.")
-            case .error(let e): update = .warning("An update didn't finish: \(e). You can still play.")
+            case .offline:
+                update = .warning("Couldn't check for updates right now. You can still play.")
+                warnActiveUpdates("Couldn't check for updates right now.")
+            case .error(let e):
+                update = .warning("An update didn't finish: \(e). You can still play.")
+                warnActiveUpdates("Update didn't finish: \(e)")
             case .other: break
             }
         }, onExit: { [self] _ in
             updater = nil
             updateEnded()
-            updateProgress = nil
             if relaunchRequested { return relaunch() }
-            if !update.finished { update = .warning("Couldn't check for updates. You can still play.") }
+            if !update.finished {
+                update = .warning("Couldn't check for updates. You can still play.")
+                warnActiveUpdates("Couldn't check for updates.")
+            }
             checkControllers()
             checkSteam()
         })
         if updater == nil {
             updateEnded()
             update = .warning("Couldn't check for updates. You can still play.")
+            warnActiveUpdates("Couldn't check for updates.")
             checkControllers()
             checkSteam()
         }
@@ -515,12 +581,20 @@ final class Launcher: ObservableObject {
         let previous = update
         update = .working(version == "newest" ? "Going back to the newest Project Reclaimer…"
                                               : "Getting Project Reclaimer \(version)…")
+        gravemindUpdate = .working(version == "newest" ? "Checking for the latest version…"
+                                                        : "Downloading version \(version)…")
+        gravemindUpdateProgress = nil
         var error: String?
         keep(python("updater.py", ["use", version], onLine: { [self] line in
             switch UpdaterEvent(line: line) {
-            case .progress(let v): updateProgress = v; progress?(v)
+            case .progress(let v): gravemindUpdateProgress = v; progress?(v)
+            case .componentStatus(.gravemind, let s): gravemindUpdate = .working(s)
+            case .componentProgress(.gravemind, let v): gravemindUpdateProgress = v; progress?(v)
+            case .componentDone(.gravemind, let s): gravemindUpdate = .done(s)
+            case .componentError(.gravemind, let s): gravemindUpdate = .warning(s); error = s
             case .done(let s) where s.hasPrefix("using "):
                 chosenVersion = String(s.dropFirst(6))
+                gravemindUpdate = .done("\(chosenVersion!): selected for this session")
                 update = .done("Playing an older Project Reclaimer (\(chosenVersion!)) for servers that haven't updated yet")
             case .done:
                 chosenVersion = nil
@@ -530,8 +604,8 @@ final class Launcher: ObservableObject {
             default: break
             }
         }, onExit: { [self] _ in
-            updateProgress = nil
-            if error != nil { update = previous }
+            gravemindUpdateProgress = nil
+            if error != nil { update = previous; gravemindUpdate = .warning(error!) }
             done(error)
         }))
     }

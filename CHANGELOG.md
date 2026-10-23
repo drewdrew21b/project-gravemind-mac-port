@@ -2,6 +2,9 @@
 
 Changes since the port moved from Project Reclaimer (Halo 3) to Project Gravemind (Halo 2).
 
+## 0.8.4
+- Updates have separate Application and Project Gravemind sections with independent progress and version results.
+
 ## 0.8.3
 - Problems joining or playing? now has "Play with debug logging": one launch with detailed Wine, DXVK and file-trace logging. When the game closes, the logs and Gravemind's own logs are zipped to the Desktop as `Gravemind-Debug-Logs-<date and time>.zip`. Later launches are normal.
 - The installer replaces a Wine stub `d3d11.dll` in the prefix with DXVK, which fixes a crash at startup ("Unimplemented function d3d11.dll.D3D11CreateDeviceAndSwapChain").

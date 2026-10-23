@@ -275,7 +275,11 @@ struct ContentView: View {
         VStack(alignment: .leading, spacing: 18) {
             header
             VStack(alignment: .leading, spacing: 14) {
-                StepRow(title: "Updates", step: m.update, progress: m.updateProgress)
+                StepRow(title: "Application", step: m.applicationUpdate,
+                    progress: m.applicationUpdateProgress ?? (m.applicationUpdate.isDone ? 1 : 0))
+                Divider()
+                StepRow(title: "Project Gravemind", step: m.gravemindUpdate,
+                    progress: m.gravemindUpdateProgress ?? (m.gravemindUpdate.isDone ? 1 : 0))
                 if m.chosenVersion != nil, !m.playing, m.update.finished {
                     Button("Back to the newest version") { m.useVersion("newest") { _ in } }
                         .padding(.leading, 34)

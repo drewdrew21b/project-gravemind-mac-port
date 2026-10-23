@@ -4,16 +4,42 @@ import CoreGraphics
 import Foundation
 
 /// One line from `updater.py run`.
+enum UpdateComponent: String, Equatable {
+    case application, gravemind
+}
+
 enum UpdaterEvent: Equatable {
-    case status(String), progress(Double), relaunch, done(String), offline(String), error(String), other
+    case status(String), progress(Double)
+    case componentStatus(UpdateComponent, String), componentProgress(UpdateComponent, Double)
+    case componentDone(UpdateComponent, String), componentError(UpdateComponent, String)
+    case relaunch, done(String), offline(String), error(String), other
 
     init(line: String) {
         func rest(_ prefix: String) -> String? {
             line.hasPrefix(prefix) ? String(line.dropFirst(prefix.count)) : nil
         }
+        func component(_ component: UpdateComponent, _ suffix: String) -> String? {
+            rest("\(component.rawValue)-\(suffix): ")
+        }
+        func progress(_ value: String?) -> Double? {
+            guard let value, let number = Double(value) else { return nil }
+            return min(max(number, 0), 100) / 100
+        }
         if line == "relaunch" { self = .relaunch }
         else if let s = rest("status: ") { self = .status(s) }
-        else if let s = rest("progress: "), let v = Double(s) { self = .progress(min(max(v, 0), 100) / 100) }
+        else if let s = component(.application, "status") { self = .componentStatus(.application, s) }
+        else if let s = component(.gravemind, "status") { self = .componentStatus(.gravemind, s) }
+        else if let s = component(.application, "progress"), let v = progress(s) {
+            self = .componentProgress(.application, v)
+        }
+        else if let s = component(.gravemind, "progress"), let v = progress(s) {
+            self = .componentProgress(.gravemind, v)
+        }
+        else if let s = component(.application, "done") { self = .componentDone(.application, s) }
+        else if let s = component(.gravemind, "done") { self = .componentDone(.gravemind, s) }
+        else if let s = component(.application, "error") { self = .componentError(.application, s) }
+        else if let s = component(.gravemind, "error") { self = .componentError(.gravemind, s) }
+        else if let s = rest("progress: "), let v = progress(s) { self = .progress(v) }
         else if let s = rest("done: ") { self = .done(s) }
         else if let s = rest("offline: ") { self = .offline(s) }
         else if let s = rest("error: ") { self = .error(s) }

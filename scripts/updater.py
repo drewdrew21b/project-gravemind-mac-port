@@ -9,8 +9,8 @@
 Each ZIP is checked against the SHA-256 digest published in the GitHub release API before its files are installed.
 
 Prints one line per event for the launcher: "status: <text>", "progress: <0-100>", "relaunch" (the launcher itself
-was replaced), and last "done: up to date|updated", "offline: <reason>" or "error: <reason>". Offline or failed
-updates never stop the game from starting.
+was replaced), and last "done: <component versions and results>", "offline: <reason>" or "error: <reason>". Offline
+or failed updates never stop the game from starting.
 """
 import fcntl
 import hashlib
@@ -40,6 +40,7 @@ RELEASE_API = os.environ.get("GRAVEMIND_RELEASE_API", "https://api.github.com/re
 RELEASES_API = os.environ.get("GRAVEMIND_RELEASES_API", "https://api.github.com/repos/BriRoz1/"
                               "h2gravemind-releases/releases?per_page=100")
 UA = {"User-Agent": "project-gravemind-mac-port"}
+COMPONENT_RESULTS = []
 
 
 class Offline(Exception):
@@ -119,13 +120,26 @@ def installed_port_version():
         return "0"  # installed before versions were recorded
 
 
+def report_component(name, version, result):
+    COMPONENT_RESULTS.append(f"{name} {version}: {result}")
+    component = "application" if name == "Mac port" else "gravemind"
+    say(f"{component}-done: {version}: {result}")
+
+
+def component_summary():
+    return "; ".join(COMPONENT_RESULTS)
+
+
 def update_port():
     """Returns "current", "updated" (installer ran; the launcher was rebuilt) or raises."""
+    say("application-status: Checking for updates…")
     raw = pinned_repo_raw()
     latest = fetch(f"{raw}/VERSION").decode().strip()
     if version_tuple(latest) <= version_tuple(installed_port_version()):
+        report_component("Mac port", installed_port_version(), "up to date")
         return "current"
     say(f"status: Updating the Mac port to {latest}…")
+    say(f"application-status: Updating to {latest}…")
     with tempfile.TemporaryDirectory() as tmp:
         script = Path(tmp) / "install.sh"
         script.write_bytes(fetch(f"{raw}/install.sh"))
@@ -150,7 +164,7 @@ def update_port():
             tail = (tail + [line])[-30:]
             if line.startswith("==> "):
                 steps += 1
-                say(f"progress: {min(95, steps * 7)}")  # the installer has ~13 steps
+                say(f"application-progress: {min(95, steps * 7)}")  # the installer has ~13 steps
         p.wait()
         signal.signal(signal.SIGTERM, signal.SIG_DFL)
     if p.returncode != 0:
@@ -158,6 +172,7 @@ def update_port():
         raise RuntimeError(re.sub(r"^Error: ", "", err.strip()))
     if installed_port_version() != latest:  # relaunching would only start the same update again
         raise RuntimeError(f"the update to {latest} didn't install; it will be tried again next time")
+    report_component("Mac port", latest, "updated")
     return "updated"
 
 
@@ -204,7 +219,7 @@ def download_verified(url, target, expected):
                 done += len(block)
                 pct = done * 100 // total if total else 0
                 if pct != shown:
-                    say(f"progress: {pct}")
+                    say(f"gravemind-progress: {pct}")
                     shown = pct
         if sha256(part) != expected:
             raise RuntimeError("the Project Gravemind download didn't match its checksum; kept the current version")
@@ -250,7 +265,9 @@ def install_release(version, url, expected, target):
 def update_game():
     """Returns "current", "updated", "running" (left alone while the game runs) or "chosen" (the player picked an
     older release), or raises."""
+    say("gravemind-status: Checking for updates…")
     if CHOSEN.exists():
+        report_component("Project Gravemind", CHOSEN.read_text().strip(), "using an older selected version")
         return "chosen"
     version, url, expected = latest_release()
     marker = GAME_PACKAGE / ".release-sha256"
@@ -258,11 +275,15 @@ def update_game():
     exe_marker = GAME_PACKAGE / ".release-exe-sha256"
     if (exe.is_file() and marker.is_file() and marker.read_text().strip() == expected and exe_marker.is_file()
             and exe_marker.read_text().strip() == sha256(exe)):
+        report_component("Project Gravemind", version, "up to date")
         return "current"
     if game_running():
+        report_component("Project Gravemind", version, "update pending while the game is running")
         return "running"
     say(f"status: Updating Project Gravemind to {version}…")
+    say(f"gravemind-status: Updating to {version}…")
     install_release(version, url, expected, GAME_PACKAGE)
+    report_component("Project Gravemind", version, "updated")
     return "updated"
 
 
@@ -306,6 +327,7 @@ def use(version):
         say(f"status: Downloading Project Gravemind {version}…")
         install_release(version, url, expected, target)
     CHOSEN.write_text(version + "\n")
+    report_component("Project Gravemind", version, "selected for this session")
     return "chosen"
 
 
@@ -324,9 +346,11 @@ def main(argv):
         try:
             result = use(argv[2])
         except Offline as e:
+            say(f"gravemind-error: Couldn't download it ({e}). Check your internet connection and try again.")
             say(f"error: Couldn't download it ({e}). Check your internet connection and try again.")
             return 1
         except Exception as e:
+            say(f"gravemind-error: {e}")
             say(f"error: {e}")
             return 1
         if result == "chosen":
@@ -338,6 +362,10 @@ def main(argv):
         print(__doc__)
         return 2
     BASE.mkdir(parents=True, exist_ok=True)
+    COMPONENT_RESULTS.clear()
+    if argv[1] == "game" and installed_port_version() != "0":
+        # The launcher uses game-only mode immediately after a Mac-port update and relaunch.
+        report_component("Mac port", installed_port_version(), "installed")
     lock = open(BASE / ".update.lock", "w")  # one update at a time (e.g. the app opened twice)
     if not os.environ.get("RECLAIMER_UPDATE_LOCKED"):  # (set when run by install.sh inside a port update)
         try:
@@ -360,9 +388,13 @@ def main(argv):
             sys.stderr.write(f"updater: {step.__name__}: {results[step.__name__]}\n")
         except Offline as e:
             sys.stderr.write(f"updater: {step.__name__}: can't connect: {e}\n")
+            component = "application" if step is update_port else "gravemind"
+            say(f"{component}-error: Can't connect: {e}")
             offline = offline or str(e)
         except Exception as e:  # report and carry on: a failed update never blocks the game
             sys.stderr.write(f"updater: {step.__name__}: {e}\n")
+            component = "application" if step is update_port else "gravemind"
+            say(f"{component}-error: {e}")
             errors.append(str(e))
     if results.get("update_port") == "updated":
         say("relaunch")
@@ -375,6 +407,8 @@ def main(argv):
         return 0
     if "chosen" in results:
         say(f"done: using {CHOSEN.read_text().strip()}")
+    elif component_summary():
+        say(f"done: {component_summary()}")
     elif "updated" in results:
         say("done: updated")
     elif "running" in results:

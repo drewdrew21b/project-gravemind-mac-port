@@ -77,7 +77,10 @@ class UpdaterTest(unittest.TestCase):
         rc, output = self.run_updater("game")
         self.assertEqual(rc, 0, output)
         self.assertIn("status: Updating Project Gravemind to 0.18.374…", output)
-        self.assertEqual(output[-1], "done: updated")
+        self.assertIn("gravemind-status: Checking for updates…", output)
+        self.assertIn("gravemind-done: 0.18.374: updated", output)
+        self.assertTrue(any(line.startswith("gravemind-progress: ") for line in output), output)
+        self.assertEqual(output[-1], "done: Project Gravemind 0.18.374: updated")
         self.assertEqual((self.package_dir / "h2gravemind.exe").read_bytes(), b"MZ Gravemind")
         self.assertEqual((self.package_dir / ".release-version").read_text().strip(), "0.18.374")
         self.assertEqual((self.package_dir / ".release-sha256").read_text().strip(), sha(self.latest_zip))
@@ -88,15 +91,36 @@ class UpdaterTest(unittest.TestCase):
         exe = self.package_dir / "h2gravemind.exe"
         rc, output = self.run_updater("game")
         self.assertEqual(rc, 0, output)
-        self.assertEqual(output[-1], "done: up to date")
+        self.assertEqual(output[-1], "done: Project Gravemind 0.18.374: up to date")
         self.assertEqual(exe.read_bytes(), b"MZ Gravemind")
+
+    def test_run_reports_mac_port_and_gravemind_versions(self):
+        self.home.mkdir()
+        (self.home / "version").write_text("0.8.3\n")
+        raw = self.tmp / "port-release"
+        raw.mkdir()
+        (raw / "VERSION").write_text("0.8.3\n")
+
+        rc, output = self.run_updater("run", RECLAIMER_REPO_RAW=raw.as_uri())
+
+        self.assertEqual(rc, 0, output)
+        self.assertEqual(output[-1], "done: Mac port 0.8.3: up to date; Project Gravemind 0.18.374: updated")
+
+    def test_game_only_check_reports_installed_port_version(self):
+        self.home.mkdir()
+        (self.home / "version").write_text("0.8.3\n")
+
+        rc, output = self.run_updater("game")
+
+        self.assertEqual(rc, 0, output)
+        self.assertEqual(output[-1], "done: Mac port 0.8.3: installed; Project Gravemind 0.18.374: updated")
 
     def test_modified_executable_is_repaired_from_verified_release(self):
         self.run_updater("game")
         (self.package_dir / "h2gravemind.exe").write_bytes(b"damaged")
         rc, output = self.run_updater("game")
         self.assertEqual(rc, 0, output)
-        self.assertEqual(output[-1], "done: updated")
+        self.assertEqual(output[-1], "done: Project Gravemind 0.18.374: updated")
         self.assertEqual((self.package_dir / "h2gravemind.exe").read_bytes(), b"MZ Gravemind")
 
     def test_checksum_mismatch_keeps_installed_release(self):
@@ -138,6 +162,7 @@ class UpdaterTest(unittest.TestCase):
         self.assertIsNone(listing["chosen"])
         rc, output = self.run_updater("use", "0.18.373")
         self.assertEqual(rc, 0, output)
+        self.assertIn("gravemind-done: 0.18.373: selected for this session", output)
         self.assertEqual(output[-1], "done: using 0.18.373")
         self.assertEqual((self.home / "game" / "versions" / "v0.18.373" / "h2gravemind.exe").read_bytes(),
                          b"MZ older Gravemind")
