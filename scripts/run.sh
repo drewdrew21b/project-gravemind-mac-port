@@ -2,7 +2,7 @@
 # Launch Project Gravemind under Wine Staging + DXVK-macOS (D3D11 -> Vulkan -> MoltenVK -> Metal).
 BASE=${RECLAIMER_HOME:-~/Games/ProjectGravemind}
 if [ "${GRAVEMIND_DEBUG:-}" = 1 ]; then
-  export WINEDEBUG=${GRAVEMIND_WINEDEBUG:-+timestamp,+pid,+tid,err+all,+seh,+winsock,+winhttp,+wininet}
+  export WINEDEBUG=${GRAVEMIND_WINEDEBUG:-+timestamp,+pid,+tid,+file,err+all,+seh,+winsock,+winhttp,+wininet}
   export DXVK_LOG_LEVEL=${DXVK_LOG_LEVEL:-info}
   export DXVK_LOG_PATH=${DXVK_LOG_PATH:-"$BASE/logs"}
 else

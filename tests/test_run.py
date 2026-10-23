@@ -45,7 +45,7 @@ class RunTest(unittest.TestCase):
 
     def test_debug_mode_enables_wine_exception_network_and_dxvk_logs(self):
         out = self.run_game(extra_env={"GRAVEMIND_DEBUG": "1"})
-        self.assertIn("wine=+timestamp,+pid,+tid,err+all,+seh,+winsock,+winhttp,+wininet", out)
+        self.assertIn("wine=+timestamp,+pid,+tid,+file,err+all,+seh,+winsock,+winhttp,+wininet", out)
         self.assertIn("dxvk=info", out)
         self.assertIn(f"dxvkpath={self.home}/logs", out)
 

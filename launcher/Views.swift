@@ -214,6 +214,8 @@ struct PlayButtonStyle: ButtonStyle {
 /// The game's own messages a player is most likely to hit, in plain words, with what to do about each.
 struct HelpPanel: View {
     @Binding var open: Bool
+    var canDebugPlay = false
+    var debugPlay: () -> Void = {}
     private let items: [(game: String, help: String)] = [
         ("Halo 2 content is missing",
          "Project Gravemind needs both Halo 2 campaign and multiplayer files. Install or repair Halo 2 from Tools > Installed games, or verify Halo: The Master Chief Collection's files in Steam."),
@@ -245,6 +247,12 @@ struct HelpPanel: View {
                         .font(.caption).foregroundStyle(.secondary)
                     Button("Show logs") { NSWorkspace.shared.open(home.appendingPathComponent("logs")) }
                         .buttonStyle(.link).font(.caption)
+                }
+                VStack(alignment: .leading, spacing: 4) {
+                    Button("Play with debug logging", action: debugPlay)
+                        .disabled(!canDebugPlay)
+                    Text("Starts the game once with detailed logging, which can be slow and large. When the game closes, the logs are zipped to your Desktop as Gravemind-Debug-Logs-<date and time>.zip. Later Plays are normal.")
+                        .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 }
             }
             .padding(.top, 10)
@@ -314,7 +322,8 @@ struct ContentView: View {
                 }
             }
 
-            HelpPanel(open: $m.helpOpen)
+            HelpPanel(open: $m.helpOpen, canDebugPlay: m.ready && !m.playing && !m.halo2Missing,
+                      debugPlay: { m.play(debug: true) })
 
             HStack(spacing: 4) {
                 Text("Mac port based on")

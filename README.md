@@ -9,8 +9,7 @@
 <p align="center">
 	<a href="#install"><img alt="Install for macOS" src="https://img.shields.io/badge/Install-macOS-2ea44f?logo=apple"></a>
 	<a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/License-MIT-blue.svg"></a>
-	<a href="https://github.com/drewdrew21b/project-gravemind-mac-port/releases"><img alt="Release: not published" src="https://img.shields.io/badge/Release-not%20published-lightgrey"></a>
-	<a href="https://github.com/drewdrew21b/project-gravemind-mac-port/actions"><img alt="Nightly: not configured" src="https://img.shields.io/badge/Nightly-not%20configured-lightgrey"></a>
+	<a href="https://github.com/drewdrew21b/project-gravemind-mac-port/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/drewdrew21b/project-gravemind-mac-port?label=Release"></a>
 	<a href="https://github.com/drewdrew21b/project-gravemind-mac-port/actions/workflows/checks.yml"><img alt="Build status" src="https://github.com/drewdrew21b/project-gravemind-mac-port/actions/workflows/checks.yml/badge.svg?branch=main"></a>
 	<a href="#requirements"><img alt="Platform: macOS, Apple silicon" src="https://img.shields.io/badge/Platform-macOS%20(Apple%20silicon)-000000?logo=apple"></a>
 </p>

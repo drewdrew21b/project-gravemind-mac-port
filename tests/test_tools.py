@@ -309,6 +309,23 @@ class ToolsTest(unittest.TestCase):
         self.assertNotIn("SecretName", text)
         self.assertNotIn("steam-account", " ".join(names))
 
+    def test_debug_report_is_named_for_its_time_and_includes_gravemind_logs(self):
+        (self.home / "steam-account").write_text("SecretName\n")
+        (self.home / "logs" / "client-wine-debug.log").write_text("trace for SecretName\n")
+        own = self.home / "prefix-wine" / "drive_c" / "users" / "u" / "AppData" / "Local" / "Project Gravemind" / "logs"
+        own.mkdir(parents=True)
+        (own / "gravemind.log").write_text("game log\n")
+        rc, out = self.run_tool("debug-report")
+        self.assertEqual(rc, 0, out)
+        path = Path(out[-1][3:])
+        self.assertRegex(path.name, r"^Gravemind-Debug-Logs-\d{4}-\d\d-\d\d_\d\d-\d\d-\d\d\.zip$")
+        with zipfile.ZipFile(path) as z:
+            names = z.namelist()
+            text = "".join(z.read(n).decode() for n in names)
+        self.assertIn("logs/client-wine-debug.log", names)
+        self.assertIn("gravemind-logs/gravemind.log", names)
+        self.assertNotIn("SecretName", text)
+
     def test_report_identifies_gravemind_and_halo2_install_state(self):
         self.fake_mcc(halo2=True)
         (self.home / "game" / "gravemind").mkdir(parents=True)

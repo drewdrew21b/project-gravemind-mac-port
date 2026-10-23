@@ -56,6 +56,8 @@ final class Launcher: ObservableObject {
     @Published var link = ""
     @Published var linkError: String?
     @Published var helpOpen = false
+    private var debugRun = false   // this launch has debug logging on; its logs are collected when the game ends
+    private var stayOpen = false   // a debug run's logs were collected: stay open to say where they are
     @Published var controllers: Step? { didSet { if controllers != oldValue, let c = controllers { log("controllers: \(c)") } } }
     /// Where the Mac's sound goes: the game keeps that output once it starts, so it is shown (and warned about) before Play.
     // (logged without device names, which go into reports people send: "Chris AirPods Pro")
@@ -417,9 +419,14 @@ final class Launcher: ObservableObject {
     }
 
     // 4. play
-    func play() {
+    func play() { play(debug: false) }
+
+    /// `debug` turns Wine, DXVK and Gravemind logging up for this launch only; nothing is saved for later runs.
+    func play(debug: Bool) {
         notice = nil
         joinTrouble = nil
+        debugRun = debug
+        stayOpen = false
         // asked once, on the first Play: mod downloads are announced with notifications while the game is in front
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { granted, error in
             let why = error.map { " (\($0.localizedDescription))" } ?? ""
@@ -439,7 +446,8 @@ final class Launcher: ObservableObject {
         // From the install's game folder: launch.sh starts the Workshop helper in the background, and it must run
         // where the game does, or the window can't tell it apart from another installation's helper.
         game = LineProcess("/bin/zsh", [gameDir.appendingPathComponent("launch.sh").path],
-                           workingDirectory: gameDir, onLine: { _ in }, onExit: { _ in })
+                           workingDirectory: gameDir, environment: debug ? ["GRAVEMIND_DEBUG": "1"] : [:],
+                           onLine: { _ in }, onExit: { _ in })
         if game == nil { gameStopped(early: true) }
     }
 
@@ -664,8 +672,30 @@ final class Launcher: ObservableObject {
         guard !checkingCrash else { return }
         checkingCrash = true
         // first whatever the game left running under Wine (its engine worker can outlive it, spinning a CPU core)
-        let stop = python("tools.py", ["force-quit"], onLine: { _ in }, onExit: { [self] _ in checkCrash(early: early) })
-        if let stop { keep(stop) } else { checkCrash(early: early) }
+        let stop = python("tools.py", ["force-quit"], onLine: { _ in }, onExit: { [self] _ in collectDebugLogs { [self] in checkCrash(early: early) } })
+        if let stop { keep(stop) } else { collectDebugLogs { [self] in checkCrash(early: early) } }
+    }
+
+    /// After a debug run: zip its logs to the Desktop, then carry on. The window stays open to say where they are.
+    private func collectDebugLogs(then next: @escaping () -> Void) {
+        guard debugRun else { return next() }
+        debugRun = false
+        stayOpen = true
+        notice = "Collecting the debug logs…"
+        var zip: String?
+        let collect = python("tools.py", ["debug-report"], onLine: { line in
+            if line.hasPrefix("ok ") { zip = String(line.dropFirst(3)) }
+        }, onExit: { [self] _ in
+            if let zip {
+                let url = URL(fileURLWithPath: zip)
+                NSWorkspace.shared.activateFileViewerSelecting([url])
+                notice = "The debug logs are on your Desktop: \(url.lastPathComponent)"
+            } else {
+                notice = "The debug logs couldn't be collected. Tools > Make Report has the normal logs."
+            }
+            next()
+        })
+        if let collect { keep(collect) } else { next() }
     }
 
     private func checkCrash(early: Bool) {
@@ -690,7 +720,7 @@ final class Launcher: ObservableObject {
     }
 
     private func closeOrStay(early: Bool) {
-        if early || showTools || tools.busy != nil { gameStopped(early: early) } else { NSApp.terminate(nil) }
+        if early || stayOpen || showTools || tools.busy != nil { gameStopped(early: early) } else { NSApp.terminate(nil) }
     }
 
     private func gameStopped(early: Bool) {

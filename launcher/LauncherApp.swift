@@ -44,12 +44,13 @@ final class LineProcess {
     private var buffer = Data()
     var isRunning: Bool { process.isRunning }
 
-    init?(_ executable: String, _ arguments: [String], workingDirectory: URL? = nil,
+    init?(_ executable: String, _ arguments: [String], workingDirectory: URL? = nil, environment: [String: String] = [:],
           onLine: @escaping @MainActor (String) -> Void, onExit: @escaping @MainActor (Int32) -> Void) {
         process.executableURL = URL(fileURLWithPath: executable)
         process.arguments = arguments
         process.currentDirectoryURL = workingDirectory
         var env = ProcessInfo.processInfo.environment
+        env.merge(environment) { _, new in new }
         env["RECLAIMER_HOME"] = home.path
         if let installer = Bundle.main.url(forResource: "install", withExtension: "sh") {
             env["RECLAIMER_BUNDLED_INSTALLER"] = installer.path

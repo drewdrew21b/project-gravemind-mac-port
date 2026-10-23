@@ -27,7 +27,7 @@ WINE_PKG="wine-staging-11.18-osx64.tar.xz|https://github.com/Gcenx/macOS_Wine_bu
 DXVK_PKG="dxvk-macOS-async-v1.10.3-20230507-repack.tar.gz|https://github.com/Gcenx/DXVK-macOS/releases/download/v1.10.3-20230507-repack/dxvk-macOS-async-v1.10.3-20230507-repack.tar.gz|acd1520ad105d8ef124a09c8e11a259a5dc8bdc565ad18e0e52693f9807b2477"
 MOLTENVK_PKG="MoltenVK-macos-1.4.2.tar|https://github.com/KhronosGroup/MoltenVK/releases/download/v1.4.2/MoltenVK-macos.tar|f95765a6229cb7b915990a2890ce12ebe36a730b021545d3d52ae69ce4c4024e"
 DEPOT_PKG="DepotDownloader-macos-arm64.zip|https://github.com/SteamRE/DepotDownloader/releases/download/DepotDownloader_3.4.0/DepotDownloader-macos-arm64.zip|60e80c7c496f3f9a079cd3c62036b35d088c27bc0149baf38f009eb57a52f6a5"
-LAUNCHER_SHA=d7533abda6108dfc0026021d5061274babc89bba7fa9a4c1fbfe9a2931c436d4  # launcher/ProjectReclaimer (built by scripts/make_launcher.sh)
+LAUNCHER_SHA=94df55436644e20d21476a4e900089502a85b7d5d8c248505333005154616892  # launcher/ProjectReclaimer (built by scripts/make_launcher.sh)
 UPDATE=${RECLAIMER_UPDATE:-}
 GUI=${RECLAIMER_GUI:-}
 # give up on a stalled connection instead of hanging (the launcher waits for this when updating)
@@ -189,7 +189,7 @@ fi
 unlink_documents "$BASE/prefix-wine"
 # DXVK-macOS goes into this prefix's system32 so the shared game folder stays free of graphics DLLs.
 SYS32="$BASE/prefix-wine/drive_c/windows/system32"
-if ! installed dxvk "${DXVK_PKG%%|*}" || [ ! -f "$SYS32/d3d11.dll" ]; then
+if ! installed dxvk "${DXVK_PKG%%|*}" || [ "$(stat -f %z "$SYS32/d3d11.dll" 2>/dev/null || echo 0)" -lt 1000000 ]; then  # (Wine's own 14 KB stub is not DXVK)
   tar -xzf "$(fetch "$DXVK_PKG")" -C "$CACHE"
   cp "$CACHE/dxvk-macOS-async-v1.10.3-20230507-repack/x64/d3d10core.dll" "$SYS32/"
   cp "$CACHE/dxvk-macOS-async-v1.10.3-20230507-repack/x64/d3d11.dll" "$SYS32/d3d11.dll"

@@ -6,6 +6,7 @@
     crash-check        "crash: <plain explanation>" if the last game log shows a crash, else "ok"
     force-quit         stop this install's Gravemind process, Wine, and wineserver
     report             zip logs, Gravemind version, and Halo 2 install state to the Desktop
+    debug-report       the same, plus Gravemind's own logs, as Gravemind-Debug-Logs-<timestamp>.zip
     games              Halo 2 installed state and size, MCC size, and free disk space
     add-game halo2     download Halo 2 from the player's Steam copy using QR sign-in
     repair-game halo2  check installed Halo 2 files against Steam
@@ -367,7 +368,7 @@ def startup_evidence():
         return ["Startup: unknown (the startup check failed)"], None
 
 
-def report():
+def report(debug=False):
     account = ""
     try:
         account = (BASE / "steam-account").read_text().strip()
@@ -398,12 +399,25 @@ def report():
     summary.append("Halo 2 installed: " + ("yes" if game_installed("halo2") else "no"))
     summary.append(f"Free disk space: {shutil.disk_usage(BASE).free / 1e9:.0f} GB")
     DESKTOP.mkdir(parents=True, exist_ok=True)
-    path = DESKTOP / f"Project Gravemind report {time.strftime('%Y-%m-%d %H.%M')}.zip"
+    # a debug run's file trace is far larger than a normal log: keep more of its tail
+    tail = 100_000_000 if debug else 2_000_000
+    name = (f"Gravemind-Debug-Logs-{time.strftime('%Y-%m-%d_%H-%M-%S')}.zip" if debug
+            else f"Project Gravemind report {time.strftime('%Y-%m-%d %H.%M')}.zip")
+    path = DESKTOP / name
     with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as z:
         z.writestr("summary.txt", scrub("\n".join(summary) + "\n"))
         for log in sorted(LOGS.glob("*.log")):
-            z.writestr(f"logs/{log.name}", scrub(log.read_text(errors="replace")[-2_000_000:]))
+            z.writestr(f"logs/{log.name}", scrub(log.read_text(errors="replace")[-tail:]))
+        if debug:  # Gravemind's own logs live in the Wine user's profile
+            own = BASE / "prefix-wine" / "drive_c" / "users"
+            for log in sorted(own.glob("*/AppData/Local/Project Gravemind/logs/*")):
+                if log.is_file():
+                    z.writestr(f"gravemind-logs/{log.name}", scrub(log.read_text(errors="replace")[-tail:]))
     return f"ok {path}"
+
+
+def debug_report():
+    return report(debug=True)
 
 
 def reset_graphics():
@@ -558,7 +572,7 @@ def uninstall():
 COMMANDS = {"controller-check": controller_check,
             "audio-check": audio_check, "crash-check": crash_check, "startup-state": startup_state,
             "force-quit": force_quit, "mods": mods,
-            "report": report, "reset-graphics": reset_graphics, "forget-steam": forget_steam, "repair": repair,
+            "report": report, "debug-report": debug_report, "reset-graphics": reset_graphics, "forget-steam": forget_steam, "repair": repair,
             "games": games, "uninstall": uninstall}
 
 

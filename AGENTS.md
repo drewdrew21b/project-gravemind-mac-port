@@ -18,6 +18,7 @@ Pointers for contributors and coding agents. The README is for players; this fil
 
 - **Don't commit `launcher/ProjectReclaimer` or change `LAUNCHER_SHA` in a PR.** The maintainer rebuilds the launcher from source at release time (`scripts/make_launcher.sh` builds it and pins its checksum). Same for any other prebuilt binary: commit its source and build script.
 - Players get a change only when `VERSION` on main goes up; the maintainer bumps it.
+- Record every player-visible change in `CHANGELOG.md` under the upcoming version's `## X.Y.Z` heading (newest first, above `## Known issues`) in the same PR. The release workflow publishes that section as the release notes and fails if the tagged version has none.
 - Tests and experiments never touch a real install (`~/Games/ProjectGravemind`, `~/Applications`): use a throwaway `RECLAIMER_HOME` / `RECLAIMER_APPS_DIR`.
 - Process matches (`pgrep`/`pkill`) name this install or a test path, never a bare script or app name.
 - Merge `main` and re-run the checks before asking for review: `main` moves, and a green run from before the move proves nothing about the merge. Merge, don't rebuild: never re-pin `LAUNCHER_SHA`, commit `launcher/ProjectReclaimer` or change `VERSION` to make the checks pass.
