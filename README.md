@@ -46,7 +46,7 @@ This repository does not currently publish a DMG. To install Project Gravemind, 
 	- creates **Project Gravemind** in `~/Applications`.
 3. Open Project Gravemind from Applications, Launchpad, or Spotlight. It checks for Mac-port and game updates when opened.
 
-If installation stops, run the same command again; completed steps are reused and Steam downloads can resume. Existing `~/Games/ProjectReclaimer` and **Project Reclaimer** app data are not reused or removed.
+If installation stops, run the same command again; completed steps are reused and Steam downloads can resume. Existing `~/Games/ProjectGravemind` and **Project Gravemind** app data are not reused or removed.
 
 To build the launcher app and a local disk image from source, run `scripts/make_launcher.sh` and `scripts/make_dmg.sh`.
 
@@ -90,3 +90,13 @@ Use **Tools > Uninstall** in the app, or run:
 ```
 
 The Gravemind uninstaller removes the app in `~/Applications` and its `~/Games/ProjectGravemind` folder, including Halo 2 files, Wine, and settings. It does not remove a separate legacy Project Reclaimer install.
+
+## Credits
+
+[Project Gravemind](https://briroz1.github.io/project-gravemind/index.html) · [Wine](https://www.winehq.org) builds by
+[Gcenx](https://github.com/Gcenx) · [DXVK-macOS](https://github.com/Gcenx/DXVK-macOS) ·
+[MoltenVK](https://github.com/KhronosGroup/MoltenVK) · [Mesa for Windows](https://github.com/pal1000/mesa-dist-win) ·
+[DepotDownloader](https://github.com/SteamRE/DepotDownloader). Halo is a Microsoft/343 Industries game; you need your
+own copy. Not affiliated with Project Reclaimer, Microsoft or Valve. 
+
+Based on [Project Reclaimer](https://projectreclaimer.dev).
