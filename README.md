@@ -12,6 +12,7 @@
 	<a href="https://github.com/drewdrew21b/project-gravemind-mac-port/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/drewdrew21b/project-gravemind-mac-port?label=Release"></a>
 	<a href="https://github.com/drewdrew21b/project-gravemind-mac-port/actions/workflows/checks.yml"><img alt="Build status" src="https://github.com/drewdrew21b/project-gravemind-mac-port/actions/workflows/checks.yml/badge.svg?branch=main"></a>
 	<a href="#requirements"><img alt="Platform: macOS, Apple silicon" src="https://img.shields.io/badge/Platform-macOS%20(Apple%20silicon)-000000?logo=apple"></a>
+	<a href="https://discord.gg/7nAmnwnQqb"><img src="https://img.shields.io/badge/Discord-join-5865F2?logo=discord&logoColor=white" alt="Discord"></a>
 </p>
 
 An experimental Apple Silicon launcher for [Project Gravemind](https://github.com/BriRoz1/h2gravemind-beta), the Halo 2 project for Halo: The Master Chief Collection. It installs the Windows release under Wine and downloads the required MCC files from the player's own Steam account.
