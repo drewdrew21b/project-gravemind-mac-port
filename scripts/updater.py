@@ -188,14 +188,14 @@ def release_asset(release):
     """Return the version and checksum-verified ZIP asset from a Gravemind release."""
     version = release_version(release)
     for asset in release.get("assets", []):
-        if asset.get("name") != "h2gravemind.zip":
+        if asset.get("name") != "h2gravemind_beta.zip":
             continue
         digest = str(asset.get("digest", ""))
         match = re.fullmatch(r"sha256:([0-9a-fA-F]{64})", digest)
         url = asset.get("browser_download_url")
         if match and url:
             return version, url, match.group(1).lower()
-    raise RuntimeError(f"Project Gravemind {version} has no verifiable h2gravemind.zip")
+    raise RuntimeError(f"Project Gravemind {version} has no verifiable h2gravemind_beta.zip")
 
 
 def latest_release():
@@ -233,7 +233,7 @@ def install_release(version, url, expected, target):
     target.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(dir=target.parent) as tmp:
         work = Path(tmp)
-        archive = work / "h2gravemind.zip"
+        archive = work / "h2gravemind_beta.zip"
         download_verified(url, archive, expected)
         extracted = work / "package"
         extracted.mkdir()

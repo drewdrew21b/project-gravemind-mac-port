@@ -61,7 +61,7 @@ class UpdaterTest(unittest.TestCase):
     def release(tag, archive, content):
         return {"tag_name": tag, "published_at": "2026-10-10T13:20:51Z",
                 "prerelease": False, "draft": False,
-                "assets": [{"name": "h2gravemind.zip", "digest": f"sha256:{sha(content)}",
+                "assets": [{"name": "h2gravemind_beta.zip", "digest": f"sha256:{sha(content)}",
                             "browser_download_url": archive.as_uri()}]}
 
     def run_updater(self, *args, **env):
