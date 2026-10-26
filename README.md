@@ -14,13 +14,13 @@
 	<a href="#requirements"><img alt="Platform: macOS, Apple silicon" src="https://img.shields.io/badge/Platform-macOS%20(Apple%20silicon)-000000?logo=apple"></a>
 </p>
 
-An experimental Apple Silicon launcher for [Project Gravemind](https://github.com/BriRoz1/h2gravemind-releases), the Halo 2 project for Halo: The Master Chief Collection. It installs the Windows release under Wine and downloads the required MCC files from the player's own Steam account.
+An experimental Apple Silicon launcher for [Project Gravemind](https://github.com/BriRoz1/h2gravemind-beta), the Halo 2 project for Halo: The Master Chief Collection. It installs the Windows release under Wine and downloads the required MCC files from the player's own Steam account.
 
 Project Gravemind is distributed as a Windows-only executable, and its source is not public. This Mac port has not yet been verified in an actual Gravemind multiplayer or campaign session. Graphics, audio, controllers, networking, Steam integration, and updates may need further work on Wine.
 
 ## Credits
 
-This Mac port builds on [Project Reclaimer Mac Port](https://github.com/mattromano/project-reclaimer-mac-port) by Matt Romano. It downloads Project Gravemind releases from [BriRoz1/h2gravemind-releases](https://github.com/BriRoz1/h2gravemind-releases). Halo: The Master Chief Collection and Halo 2 are Microsoft properties; this project is independent and is not affiliated with Microsoft, Valve, or the Project Gravemind developers.
+This Mac port builds on [Project Reclaimer Mac Port](https://github.com/mattromano/project-reclaimer-mac-port) by Matt Romano. It downloads Project Gravemind releases from [BriRoz1/h2gravemind-beta](https://github.com/BriRoz1/h2gravemind-beta). Halo: The Master Chief Collection and Halo 2 are Microsoft properties; this project is independent and is not affiliated with Microsoft, Valve, or the Project Gravemind developers.
 
 ## Requirements
 

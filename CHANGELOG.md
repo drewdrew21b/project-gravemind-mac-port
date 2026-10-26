@@ -2,6 +2,9 @@
 
 Changes since the port moved from Project Reclaimer (Halo 3) to Project Gravemind (Halo 2).
 
+## 0.8.5
+ - Gravemind now comes from `BriRoz1/h2gravemind-beta`; the updater checks its releases and verifies each ZIP's SHA-256.
+
 ## 0.8.4
 - Updates have separate Application and Project Gravemind sections with independent progress and version results.
 
@@ -13,7 +16,7 @@ Changes since the port moved from Project Reclaimer (Halo 3) to Project Gravemin
 ## 0.8.2
 - First release. A `v*` tag runs the release workflow: it runs the checks, builds the DMG and publishes a GitHub release.
 - Ported the Mac launcher, installer, updater and tools to Project Gravemind (Halo 2).
-  - Gravemind comes from `BriRoz1/h2gravemind-releases`; the updater checks its releases and verifies each ZIP's SHA-256.
+  - Gravemind comes from `BriRoz1/h2gravemind-release`; the updater checks its releases and verifies each ZIP's SHA-256.
   - Mac-port updates come from this repo's `VERSION` on `main`.
   - Halo 2 files come from MCC depots 976731 (shared), 976735 (campaign), 976736 and 976737 (multiplayer), checked at `halo2/h2_maps_win64_dx11/ascension.map`.
   - Steam QR sign-in and downloads use DepotDownloader.

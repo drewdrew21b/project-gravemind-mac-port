@@ -36,9 +36,9 @@ GAME_PACKAGE = GAME / "gravemind"
 VERSIONS = GAME / "versions"          # older Gravemind builds chosen for compatibility
 CHOSEN = GAME / "chosen-version"
 RELEASE_API = os.environ.get("GRAVEMIND_RELEASE_API", "https://api.github.com/repos/BriRoz1/"
-                             "h2gravemind-releases/releases/latest")
+                             "h2gravemind-beta/releases/latest")
 RELEASES_API = os.environ.get("GRAVEMIND_RELEASES_API", "https://api.github.com/repos/BriRoz1/"
-                              "h2gravemind-releases/releases?per_page=100")
+                              "h2gravemind-beta/releases?per_page=100")
 UA = {"User-Agent": "project-gravemind-mac-port"}
 COMPONENT_RESULTS = []
 
