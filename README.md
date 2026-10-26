@@ -1,6 +1,6 @@
 <p align="center">
 	<a href="https://github.com/drewdrew21b/project-gravemind-mac-port/blob/main/launcher/Resources/ProjectGravemindIcon.png">
-		<img src="launcher/Resources/ProjectGravemindIcon.png" alt="Project Gravemind icon" width="180">
+		<img src="launcher/Resources/ProjectGravemindIcon.png" alt="Project Gravemind icon" width="180" style="border-radius:15px;">
 	</a>
 </p>
 
