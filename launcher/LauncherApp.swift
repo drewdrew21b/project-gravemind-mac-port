@@ -471,6 +471,9 @@ func renderStates(to dir: URL) {
     // Tools
     let m = Launcher()
     m.logging = false
+    m.update = .done(upToDateStatus)
+    m.applicationUpdate = .done("Mac port 0.8.6: up to date")
+    m.gravemindUpdate = .done("Project Gravemind 0.18.412: up to date")
     m.tools.freeBytes = 41_000_000_000
     m.tools.mods = [ModItem(id: "1", title: "Ultimate Forge 2.0", bytes: 8_900_000_000),
                     ModItem(id: "2", title: "Warlock", bytes: 1_600_000_000),

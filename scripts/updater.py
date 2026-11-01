@@ -3,6 +3,7 @@
 
   updater.py run    the Mac port (when GitHub has a newer VERSION, re-run its installer in update mode), then the game
     updater.py game   only the game: install the latest Project Gravemind release ZIP if needed
+    updater.py application   only the Mac port: re-run its installer if a newer VERSION is available
     updater.py versions        JSON: recent Gravemind releases
     updater.py use <version>   install and select a specific Gravemind release; "use newest" returns to latest
 
@@ -358,7 +359,7 @@ def main(argv):
         else:
             say("done: updated" if result == "updated" else "done: up to date")
         return 0
-    if len(argv) != 2 or argv[1] not in ("run", "game"):
+    if len(argv) != 2 or argv[1] not in ("run", "game", "application"):
         print(__doc__)
         return 2
     BASE.mkdir(parents=True, exist_ok=True)
@@ -379,7 +380,12 @@ def main(argv):
         # an older version is for this session only (Tools, or the window's "switch and rejoin"): opening the app
         # again goes back to the newest, so nobody stays stuck on an old one
         CHOSEN.unlink(missing_ok=True)
-    steps = [update_game] if argv[1] == "game" else [update_port, update_game]
+    if argv[1] == "game":
+        steps = [update_game]
+    elif argv[1] == "application":
+        steps = [update_port]
+    else:
+        steps = [update_port, update_game]
     for step in steps:
         if step is update_game and results.get("update_port") == "updated":
             break  # the new install.sh just updated the game with the new updater.py; this one's code is the old one

@@ -231,6 +231,16 @@ struct ToolsSheet: View {
             }
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
+                    section("Updates") {
+                        updateRow("Application", step: launcher.applicationUpdate,
+                                  progress: launcher.applicationUpdateProgress) {
+                            launcher.checkUpdate(.application)
+                        }
+                        updateRow("Project Gravemind", step: launcher.gravemindUpdate,
+                                  progress: launcher.gravemindUpdateProgress) {
+                            launcher.checkUpdate(.gravemind)
+                        }
+                    }
                     section("The game") {
                         tool("Force quit the game", "Force Quit",
                              "For a frozen game window that won't close, even with Force Quit.") {
@@ -375,6 +385,19 @@ struct ToolsSheet: View {
             }
             .controlSize(.large).fixedSize()
         }
+    }
+
+    private func updateRow(_ title: String, step: Step, progress: Double?, action: @escaping () -> Void) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            StepRow(title: title, step: step,
+                    progress: progress ?? (step.isDone ? 1 : 0))
+                .frame(maxWidth: .infinity, alignment: .leading)
+            tip("Checks for and installs updates. Quit the game first.",
+                disabled: t.busy != nil || !launcher.update.finished || launcher.playing) {
+                Button("Check", action: action)
+            }
+        }
+        .controlSize(.large)
     }
 
     /// A button with a tooltip that also shows while it's greyed out: macOS gives a disabled button none, so a clear

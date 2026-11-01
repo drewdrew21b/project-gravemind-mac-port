@@ -115,6 +115,38 @@ class UpdaterTest(unittest.TestCase):
         self.assertEqual(rc, 0, output)
         self.assertEqual(output[-1], "done: Mac port 0.8.3: installed; Project Gravemind 0.18.374: updated")
 
+    def test_application_only_check_does_not_check_gravemind(self):
+        self.home.mkdir()
+        (self.home / "version").write_text("0.8.3\n")
+        raw = self.tmp / "port-release"
+        raw.mkdir()
+        (raw / "VERSION").write_text("0.8.3\n")
+
+        rc, output = self.run_updater("application", RECLAIMER_REPO_RAW=raw.as_uri())
+
+        self.assertEqual(rc, 0, output)
+        self.assertEqual(output[-1], "done: Mac port 0.8.3: up to date")
+        self.assertFalse(any(line.startswith("gravemind-") for line in output), output)
+        self.assertFalse(self.package_dir.exists())
+
+    def test_application_update_relaunches_without_checking_gravemind(self):
+        self.home.mkdir()
+        (self.home / "version").write_text("0.8.3\n")
+        raw = self.tmp / "port-release"
+        raw.mkdir()
+        (raw / "VERSION").write_text("0.8.4\n")
+        (raw / "install.sh").write_text(
+            "#!/bin/bash\n"
+            "printf '%s\\n' \"$RECLAIMER_EXPECT_VERSION\" > \"$RECLAIMER_HOME/version\"\n"
+        )
+
+        rc, output = self.run_updater("application", RECLAIMER_REPO_RAW=raw.as_uri())
+
+        self.assertEqual(rc, 0, output)
+        self.assertIn("application-done: 0.8.4: updated", output)
+        self.assertIn("relaunch", output)
+        self.assertFalse(any(line.startswith("gravemind-") for line in output), output)
+
     def test_modified_executable_is_repaired_from_verified_release(self):
         self.run_updater("game")
         (self.package_dir / "h2gravemind.exe").write_bytes(b"damaged")

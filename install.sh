@@ -27,7 +27,7 @@ WINE_PKG="wine-staging-11.18-osx64.tar.xz|https://github.com/Gcenx/macOS_Wine_bu
 DXVK_PKG="dxvk-macOS-async-v1.10.3-20230507-repack.tar.gz|https://github.com/Gcenx/DXVK-macOS/releases/download/v1.10.3-20230507-repack/dxvk-macOS-async-v1.10.3-20230507-repack.tar.gz|acd1520ad105d8ef124a09c8e11a259a5dc8bdc565ad18e0e52693f9807b2477"
 MOLTENVK_PKG="MoltenVK-macos-1.4.2.tar|https://github.com/KhronosGroup/MoltenVK/releases/download/v1.4.2/MoltenVK-macos.tar|f95765a6229cb7b915990a2890ce12ebe36a730b021545d3d52ae69ce4c4024e"
 DEPOT_PKG="DepotDownloader-macos-arm64.zip|https://github.com/SteamRE/DepotDownloader/releases/download/DepotDownloader_3.4.0/DepotDownloader-macos-arm64.zip|60e80c7c496f3f9a079cd3c62036b35d088c27bc0149baf38f009eb57a52f6a5"
-LAUNCHER_SHA=94df55436644e20d21476a4e900089502a85b7d5d8c248505333005154616892  # launcher/ProjectReclaimer (built by scripts/make_launcher.sh)
+LAUNCHER_SHA=73d6ba057cd3a57db62fe5a644c12b0f74a890094131d525a02fee59eeafbe7e  # launcher/ProjectReclaimer (built by scripts/make_launcher.sh)
 UPDATE=${RECLAIMER_UPDATE:-}
 GUI=${RECLAIMER_GUI:-}
 # give up on a stalled connection instead of hanging (the launcher waits for this when updating)

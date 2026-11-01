@@ -14,6 +14,10 @@ enum Step: Equatable {
 
 @MainActor
 final class Launcher: ObservableObject {
+    private enum UpdateScope: Equatable {
+        case startup, application, gravemind
+    }
+
     // state changes go to logs/launcher.log, so a friend's problem can be read from one file
     @Published var update: Step = .waiting { didSet { if update != oldValue { log("update: \(update)") } } }
     @Published var applicationUpdate: Step = .waiting {
@@ -319,18 +323,35 @@ final class Launcher: ObservableObject {
         }
     }
 
-    private func runUpdate() {
+    func checkUpdate(_ component: UpdateComponent) {
+        guard !playing, update.finished, tools.busy == nil else { return }
+        runUpdate(scope: component == .application ? .application : .gravemind)
+    }
+
+    private func runUpdate(scope: UpdateScope = .startup) {
+        let isStartup = scope == .startup
         // right after restarting for a Mac port update, only the game is checked: never restart twice in a row
-        let relaunched = CommandLine.arguments.contains("--relaunched")
+        let command: String
+        switch scope {
+        case .startup: command = CommandLine.arguments.contains("--relaunched") ? "game" : "run"
+        case .application: command = "application"
+        case .gravemind: command = "game"
+        }
         update = .working("Checking for updates…")
-        applicationUpdate = .working("Checking for updates…")
-        applicationUpdateProgress = nil
-        gravemindUpdate = .waiting
-        gravemindUpdateProgress = nil
+        if isStartup {
+            applicationUpdate = .working("Checking for updates…")
+            applicationUpdateProgress = nil
+            gravemindUpdate = .waiting
+            gravemindUpdateProgress = nil
+        } else {
+            let component: UpdateComponent = scope == .application ? .application : .gravemind
+            setUpdateStep(component, .working("Checking for updates…"))
+            setUpdateProgress(component, nil)
+        }
         updateStartedAt = Date()
         updateActivity = ProcessInfo.processInfo.beginActivity(options: .userInitiated,
                                                                reason: "Updating Project Gravemind")
-        updater = python("updater.py", [relaunched ? "game" : "run"], onLine: { [self] line in
+        updater = python("updater.py", [command], onLine: { [self] line in
             switch UpdaterEvent(line: line) {
             case .status(let s): update = .working(s)
             case .progress(let v): gravemindUpdateProgress = v
@@ -350,7 +371,7 @@ final class Launcher: ObservableObject {
                 chosenVersion = String(s.dropFirst(6))
                 update = .done("Playing an older Project Reclaimer (\(chosenVersion!)) for servers that haven't updated yet")
             case .done(let s):
-                chosenVersion = nil
+                if scope != .application { chosenVersion = nil }
                 update = .done(s == "updated" ? "Updated to the latest version"
                                : s == "up to date" ? "Up to date" : s.prefix(1).uppercased() + s.dropFirst())
             case .offline:
@@ -369,15 +390,19 @@ final class Launcher: ObservableObject {
                 update = .warning("Couldn't check for updates. You can still play.")
                 warnActiveUpdates("Couldn't check for updates.")
             }
-            checkControllers()
-            checkSteam()
+            if isStartup {
+                checkControllers()
+                checkSteam()
+            }
         })
         if updater == nil {
             updateEnded()
             update = .warning("Couldn't check for updates. You can still play.")
             warnActiveUpdates("Couldn't check for updates.")
-            checkControllers()
-            checkSteam()
+            if isStartup {
+                checkControllers()
+                checkSteam()
+            }
         }
     }
 

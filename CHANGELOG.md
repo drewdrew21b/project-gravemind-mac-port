@@ -2,6 +2,9 @@
 
 Changes since the port moved from Project Reclaimer (Halo 3) to Project Gravemind (Halo 2).
 
+## 0.8.7
+- Tools can manually check for Application and Project Gravemind updates without waiting for the next launch.
+
 ## 0.8.6
 - Nintendo controllers can use Xbox-positioned face buttons, configurable in the controller window.
 
