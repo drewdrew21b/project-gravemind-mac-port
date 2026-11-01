@@ -2,6 +2,9 @@
 
 Changes since the port moved from Project Reclaimer (Halo 3) to Project Gravemind (Halo 2).
 
+## 0.8.13
+- Keep the main window within the screen when help expands; scroll the page to reach lower content.
+
 ## 0.8.12
 - Correct the separate Halo 2/MCC folder to `game/Halo The Master Chief Collection` and migrate installs from `games/`.
 

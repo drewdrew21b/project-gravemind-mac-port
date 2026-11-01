@@ -233,7 +233,6 @@ struct HelpPanel: View {
 
     var body: some View {
         DisclosureGroup(isExpanded: $open) {
-            ScrollView {  // (keeps the window shorter than a laptop screen when mods are listed too)
             VStack(alignment: .leading, spacing: 12) {
                 ForEach(items, id: \.game) { item in
                     VStack(alignment: .leading, spacing: 3) {
@@ -257,8 +256,6 @@ struct HelpPanel: View {
             }
             .padding(.top, 10)
             .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .frame(maxHeight: 300)
         } label: {
             Label("Problems joining or playing?", systemImage: "questionmark.circle").font(.callout.weight(.medium))
                 .contentShape(Rectangle())
@@ -272,7 +269,12 @@ struct ContentView: View {
     @ObservedObject var m: Launcher
     @State private var toolsDetent: PresentationDetent = .large
 
+    private var maximumContentHeight: CGFloat {
+        max(360, (NSScreen.main?.visibleFrame.height ?? 800) - 96)
+    }
+
     var body: some View {
+        ScrollView {
         VStack(alignment: .leading, spacing: 18) {
             header
             VStack(alignment: .leading, spacing: 14) {
@@ -356,6 +358,9 @@ struct ContentView: View {
         }
         .padding(24)
         .frame(width: 540)
+        }
+        .frame(maxHeight: maximumContentHeight)
+        .scrollIndicators(.visible)
         .sheet(isPresented: $m.showTools) {
             ToolsSheet(launcher: m, t: m.tools)
                 .presentationDetents([.medium, .large], selection: $toolsDetent)
