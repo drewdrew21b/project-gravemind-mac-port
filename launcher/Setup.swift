@@ -79,10 +79,12 @@ final class SetupModel: ObservableObject {
         var list: [Check] = []
         let v = ProcessInfo.processInfo.operatingSystemVersion
         list.append(Check(id: "mac", title: "Apple Silicon Mac, macOS \(v.majorVersion)", ok: true, detail: ""))
-        let canonicalMcc = home.appendingPathComponent("games/Halo The Master Chief Collection")
+        let canonicalMcc = home.appendingPathComponent("game/Halo The Master Chief Collection")
+        let previousMcc = home.appendingPathComponent("games/Halo The Master Chief Collection")
         let legacyMcc = home.appendingPathComponent(
             "prefix-wine/drive_c/Program Files (x86)/Steam/steamapps/common/Halo The Master Chief Collection")
-        let mcc = FileManager.default.fileExists(atPath: canonicalMcc.path) ? canonicalMcc : legacyMcc
+        let mcc = FileManager.default.fileExists(atPath: canonicalMcc.path) ? canonicalMcc
+            : FileManager.default.fileExists(atPath: previousMcc.path) ? previousMcc : legacyMcc
         let copying = ProcessInfo.processInfo.environment["RECLAIMER_MCC_FROM"]?.isEmpty == false
         let installed = halo2FilesPresent(in: mcc)
         if !upgrading && !copying && !installed {

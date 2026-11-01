@@ -10,7 +10,8 @@ import urllib.request
 from pathlib import Path
 
 MCC_REL = Path("drive_c") / "Program Files (x86)" / "Steam" / "steamapps" / "common" / "Halo The Master Chief Collection"
-GAME_FILES_REL = Path("games") / "Halo The Master Chief Collection"
+GAME_FILES_REL = Path("game") / "Halo The Master Chief Collection"
+PREVIOUS_GAME_FILES_REL = Path("games") / "Halo The Master Chief Collection"
 DXVK_ARCHIVE = "dxvk-macOS-async-v1.10.3-20230507-repack.tar.gz"
 DXVK_URL = "https://github.com/Gcenx/DXVK-macOS/releases/download/v1.10.3-20230507-repack/" + DXVK_ARCHIVE
 DXVK_SHA256 = "acd1520ad105d8ef124a09c8e11a259a5dc8bdc565ad18e0e52693f9807b2477"
@@ -22,6 +23,41 @@ def game_paths(base):
     return base / GAME_FILES_REL, base / "prefix-wine" / MCC_REL
 
 
+def _move_game_files(sources, destination):
+    nonempty = []
+    for source in sources:
+        if not source.exists():
+            continue
+        if not source.is_dir():
+            raise RuntimeError(f"An MCC path isn't a directory: {source}")
+        if any(source.iterdir()):
+            nonempty.append(source)
+    if len(nonempty) > 1:
+        raise RuntimeError("Multiple MCC folders contain files; refusing to merge them.")
+    if destination.exists() and not destination.is_dir():
+        raise RuntimeError(f"The separate MCC path isn't a directory: {destination}")
+    destination_has_files = destination.is_dir() and any(destination.iterdir())
+    if destination_has_files and nonempty:
+        raise RuntimeError("Both the old and new game folders contain MCC files; refusing to merge them.")
+
+    if nonempty:
+        source = nonempty[0]
+        if destination.exists():
+            shutil.rmtree(destination)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(source), str(destination))
+    for source in sources:
+        if source != destination and source.exists() and source.is_dir() and not any(source.iterdir()):
+            shutil.rmtree(source)
+
+
+def _remove_empty_previous_parent(base):
+    try:
+        (Path(base) / PREVIOUS_GAME_FILES_REL.parent).rmdir()
+    except OSError:
+        pass
+
+
 def ensure_game_files_link(base):
     """Move legacy MCC files once, then ensure Wine's expected path is a symlink."""
     base = Path(base).resolve()
@@ -29,31 +65,23 @@ def ensure_game_files_link(base):
     if prefix.is_symlink():
         raise RuntimeError(f"The Wine prefix path is a symlink; refusing to change it: {prefix}")
     game_files, link = game_paths(base)
+    previous_game_files = base / PREVIOUS_GAME_FILES_REL
     if link.is_symlink():
-        if link.resolve() != game_files:
+        target = link.resolve(strict=False)
+        if target == game_files.resolve(strict=False):
+            game_files.mkdir(parents=True, exist_ok=True)
+            _remove_empty_previous_parent(base)
+            return game_files
+        if target != previous_game_files.resolve(strict=False):
             raise RuntimeError(f"The MCC symlink points somewhere unexpected: {link}")
-        game_files.mkdir(parents=True, exist_ok=True)
-        return game_files
+        link.unlink()
 
-    if link.exists():
-        if game_files.exists():
-            if not game_files.is_dir():
-                raise RuntimeError(f"The separate MCC path isn't a directory: {game_files}")
-            if any(game_files.iterdir()) and any(link.iterdir()):
-                raise RuntimeError("Both the Wine prefix and separate game folder contain MCC files; refusing to merge them.")
-            if not any(game_files.iterdir()):
-                shutil.rmtree(game_files)
-                game_files.parent.mkdir(parents=True, exist_ok=True)
-                shutil.move(str(link), str(game_files))
-            else:
-                shutil.rmtree(link)
-        else:
-            game_files.parent.mkdir(parents=True, exist_ok=True)
-            shutil.move(str(link), str(game_files))
-
+    sources = [path for path in (link, previous_game_files) if path.exists()]
+    _move_game_files(sources, game_files)
     game_files.mkdir(parents=True, exist_ok=True)
     link.parent.mkdir(parents=True, exist_ok=True)
     link.symlink_to(game_files, target_is_directory=True)
+    _remove_empty_previous_parent(base)
     return game_files
 
 

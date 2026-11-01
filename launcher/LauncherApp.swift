@@ -479,7 +479,7 @@ func renderStates(to dir: URL) {
                     ModItem(id: "2", title: "Warlock", bytes: 1_600_000_000),
                     ModItem(id: "3", title: "Halo 3 Foundation", bytes: 337_000_000)]
     m.tools.say("The report is on your Desktop: Project Gravemind report 2026-10-21 12.31.zip")
-    let halo2Path = "/Users/player/Games/ProjectGravemind/games/Halo The Master Chief Collection/halo2"
+    let halo2Path = "/Users/player/Games/ProjectGravemind/game/Halo The Master Chief Collection/halo2"
     let halo2 = GameItem(id: "halo2", title: "Halo 2", installed: true, bytes: 60_800_000_000, path: halo2Path)
     m.tools.games = [halo2]
     m.tools.mccBytes = 78_000_000_000

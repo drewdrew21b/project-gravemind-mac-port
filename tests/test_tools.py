@@ -354,7 +354,7 @@ class ToolsTest(unittest.TestCase):
         self.assertFalse((self.home / "steam-account").exists())
 
     def fake_mcc(self, halo2=True, multiplayer=True):
-        mcc = self.home / "games/Halo The Master Chief Collection"
+        mcc = self.home / "game/Halo The Master Chief Collection"
         (mcc / "MCC").mkdir(parents=True)
         (mcc / "MCC" / "shared.pak").write_bytes(b"x" * 500)
         (mcc / ".DepotDownloader").mkdir()
@@ -384,6 +384,47 @@ class ToolsTest(unittest.TestCase):
         self.assertTrue(legacy.is_symlink())
         self.assertEqual(legacy.resolve(), separate.resolve())
 
+    def test_released_games_folder_migrates_and_empty_parent_is_removed(self):
+        tools = self.load()
+        previous = self.home / "games/Halo The Master Chief Collection"
+        previous.mkdir(parents=True)
+        (previous / "halo2.map").write_bytes(b"map")
+        link = self.home / "prefix-wine/drive_c/Program Files (x86)/Steam/steamapps/common/Halo The Master Chief Collection"
+        link.parent.mkdir(parents=True, exist_ok=True)
+        link.symlink_to(previous, target_is_directory=True)
+
+        separate = tools.wine_prefix.ensure_game_files_link(self.home)
+
+        self.assertEqual((separate / "halo2.map").read_bytes(), b"map")
+        self.assertFalse(previous.exists())
+        self.assertFalse((self.home / "games").exists())
+        self.assertEqual(link.resolve(), separate.resolve())
+
+    def test_tools_use_released_games_folder_until_migration(self):
+        previous = self.home / "games/Halo The Master Chief Collection"
+        previous.mkdir(parents=True)
+        link = self.home / "prefix-wine/drive_c/Program Files (x86)/Steam/steamapps/common/Halo The Master Chief Collection"
+        link.parent.mkdir(parents=True, exist_ok=True)
+        link.symlink_to(previous, target_is_directory=True)
+
+        tools = self.load()
+
+        self.assertEqual(tools.MCC_DIR, previous)
+
+    def test_released_games_parent_with_other_contents_is_preserved(self):
+        tools = self.load()
+        previous = self.home / "games/Halo The Master Chief Collection"
+        previous.mkdir(parents=True)
+        (previous / "halo2.map").write_bytes(b"map")
+        (self.home / "games/keep.txt").write_text("keep")
+        link = self.home / "prefix-wine/drive_c/Program Files (x86)/Steam/steamapps/common/Halo The Master Chief Collection"
+        link.parent.mkdir(parents=True, exist_ok=True)
+        link.symlink_to(previous, target_is_directory=True)
+
+        tools.wine_prefix.ensure_game_files_link(self.home)
+
+        self.assertEqual((self.home / "games/keep.txt").read_text(), "keep")
+
     def test_rebuild_prefix_preserves_separate_game_files(self):
         tools = self.load()
         legacy = self.home / "prefix-wine/drive_c/Program Files (x86)/Steam/steamapps/common/Halo The Master Chief Collection"
@@ -410,7 +451,7 @@ class ToolsTest(unittest.TestCase):
 
         result = tools.wine_prefix.prepare_prefix(self.home, rebuild=True, install_dxvk=True, runner=fake_runner)
 
-        separate = self.home / "games/Halo The Master Chief Collection"
+        separate = self.home / "game/Halo The Master Chief Collection"
         link = prefix / "drive_c/Program Files (x86)/Steam/steamapps/common/Halo The Master Chief Collection"
         self.assertEqual(result, "ok")
         self.assertEqual((separate / "ascension.map").read_bytes(), b"halo2 files")

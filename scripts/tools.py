@@ -34,9 +34,11 @@ GAME = BASE / "game"
 LOGS = BASE / "logs"
 STEAMAPPS = BASE / "prefix-wine" / "drive_c" / "Program Files (x86)" / "Steam" / "steamapps"
 WORKSHOP = STEAMAPPS / "workshop" / "content" / "976730"
-CANONICAL_MCC_DIR = BASE / "games" / "Halo The Master Chief Collection"
+CANONICAL_MCC_DIR = BASE / "game" / "Halo The Master Chief Collection"
+PREVIOUS_MCC_DIR = BASE / "games" / "Halo The Master Chief Collection"
 LEGACY_MCC_DIR = STEAMAPPS / "common" / "Halo The Master Chief Collection"
-MCC_DIR = (CANONICAL_MCC_DIR if CANONICAL_MCC_DIR.exists() or LEGACY_MCC_DIR.is_symlink()
+MCC_DIR = (CANONICAL_MCC_DIR if CANONICAL_MCC_DIR.exists()
+           else PREVIOUS_MCC_DIR if PREVIOUS_MCC_DIR.exists()
            else LEGACY_MCC_DIR if LEGACY_MCC_DIR.exists() else CANONICAL_MCC_DIR)
 APP = Path(os.environ.get("RECLAIMER_APP_PATH")
            or Path(os.environ.get("RECLAIMER_APPS_DIR", HOME / "Applications")) / "Project Gravemind.app")

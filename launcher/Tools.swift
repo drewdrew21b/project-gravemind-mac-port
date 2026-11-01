@@ -18,10 +18,12 @@ struct GameItem: Decodable, Identifiable, Equatable {
     let path: String
 }
 
-let canonicalMccFolder = home.appendingPathComponent("games/Halo The Master Chief Collection")
+let canonicalMccFolder = home.appendingPathComponent("game/Halo The Master Chief Collection")
+let previousMccFolder = home.appendingPathComponent("games/Halo The Master Chief Collection")
 let legacyMccFolder = home.appendingPathComponent(
     "prefix-wine/drive_c/Program Files (x86)/Steam/steamapps/common/Halo The Master Chief Collection")
-let mccFolder = FileManager.default.fileExists(atPath: canonicalMccFolder.path) ? canonicalMccFolder : legacyMccFolder
+let mccFolder = FileManager.default.fileExists(atPath: canonicalMccFolder.path) ? canonicalMccFolder
+    : FileManager.default.fileExists(atPath: previousMccFolder.path) ? previousMccFolder : legacyMccFolder
 
 @MainActor
 final class ToolsModel: ObservableObject {

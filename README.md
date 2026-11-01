@@ -59,7 +59,7 @@ Project Gravemind stores its settings, campaign saves, and mods in its own `Docu
 
 ## Compatibility notes
 
-- The upstream README says Gravemind finds MCC in Steam libraries and supports selecting a different MCC folder in **Settings > Language and folders > MCC folder**. This port stores MCC at `~/Games/ProjectGravemind/games/Halo The Master Chief Collection` and symlinks it into Wine's Windows Steam path; discovery still needs end-to-end confirmation on macOS.
+- The upstream README says Gravemind finds MCC in Steam libraries and supports selecting a different MCC folder in **Settings > Language and folders > MCC folder**. This port stores MCC at `~/Games/ProjectGravemind/game/Halo The Master Chief Collection` and symlinks it into Wine's Windows Steam path; discovery still needs end-to-end confirmation on macOS.
 - If Gravemind asks you to select MCC, choose `C:\Program Files (x86)\Steam\steamapps\common\Halo The Master Chief Collection` in its Wine file picker.
 - Gravemind's Workshop instructions say Steam must be open when it downloads a mod. This port does not yet run the Steam client under Wine or provide a Mac-side Gravemind Workshop downloader, so Workshop mods may not download.
 - The launcher uses the existing Wine and DXVK setup from the Reclaimer port as a starting point. No claim is made that it provides stable performance or full feature parity for Gravemind.

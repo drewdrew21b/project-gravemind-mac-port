@@ -114,7 +114,7 @@ try? fm.createDirectory(at: h.appendingPathComponent("game"), withIntermediateDi
 try? fm.createDirectory(at: h.appendingPathComponent("wine"), withIntermediateDirectories: true)
 check(launchMode(home: h, isInstalledApp: false, installedAppExists: false) == .setup,
       "first install stopped before Halo 2 downloaded: Setup again, not Upgrade")
-let paks = h.appendingPathComponent("games/Halo The Master Chief Collection/halo2/preload/paks")
+let paks = h.appendingPathComponent("game/Halo The Master Chief Collection/halo2/preload/paks")
 try? fm.createDirectory(at: paks, withIntermediateDirectories: true)
 fm.createFile(atPath: paks.appendingPathComponent("campaign.pck").path, contents: Data())
 check(launchMode(home: h, isInstalledApp: true, installedAppExists: true) == .setup,
@@ -135,6 +135,15 @@ check(launchMode(home: h, isInstalledApp: false, installedAppExists: false) == .
       "first install stopped after the download (marker left): Setup again")
 try? fm.removeItem(at: h.appendingPathComponent(".setup-incomplete"))
 check(launchMode(home: h, isInstalledApp: true, installedAppExists: true) == .upgrade, "1.0 install")
+try? fm.removeItem(at: h.appendingPathComponent("game/Halo The Master Chief Collection"))
+let previousPaks = h.appendingPathComponent("games/Halo The Master Chief Collection/halo2/preload/paks")
+try? fm.createDirectory(at: previousPaks, withIntermediateDirectories: true)
+fm.createFile(atPath: previousPaks.appendingPathComponent("campaign.pck").path, contents: Data())
+let previousMaps = previousPaks.deletingLastPathComponent().deletingLastPathComponent()
+      .appendingPathComponent("h2_maps_win64_dx11")
+try? fm.createDirectory(at: previousMaps, withIntermediateDirectories: true)
+fm.createFile(atPath: previousMaps.appendingPathComponent("ascension.map").path, contents: Data())
+check(launchMode(home: h, isInstalledApp: true, installedAppExists: true) == .upgrade, "released games folder migration")
 try? fm.removeItem(at: h.appendingPathComponent("games"))
 let legacyPaks = h.appendingPathComponent(
       "prefix-wine/drive_c/Program Files (x86)/Steam/steamapps/common/Halo The Master Chief Collection/halo2/preload/paks")

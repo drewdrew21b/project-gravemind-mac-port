@@ -220,11 +220,13 @@ func launchMode(home: URL, isInstalledApp: Bool, installedAppExists: Bool) -> La
     if !fm.fileExists(atPath: home.appendingPathComponent("version").path) {
         // a 1.0 install has its game files and no version file; a first install that stopped partway (window
         // closed, Mac restarted) left a marker, and carries on as Setup instead of a "one-time upgrade"
-        let halo2Folder = home.appendingPathComponent("games/Halo The Master Chief Collection")
+        let halo2Folder = home.appendingPathComponent("game/Halo The Master Chief Collection")
+        let previousHalo2Folder = home.appendingPathComponent("games/Halo The Master Chief Collection")
         let legacyHalo2Folder = home.appendingPathComponent(
             "prefix-wine/drive_c/Program Files (x86)/Steam/steamapps/common/Halo The Master Chief Collection")
         let incomplete = home.appendingPathComponent(".setup-incomplete").path
-        return (halo2FilesPresent(in: halo2Folder) || halo2FilesPresent(in: legacyHalo2Folder))
+        return (halo2FilesPresent(in: halo2Folder) || halo2FilesPresent(in: previousHalo2Folder)
+                || halo2FilesPresent(in: legacyHalo2Folder))
             && !fm.fileExists(atPath: incomplete) ? .upgrade : .setup
     }
     if !isInstalledApp, installedAppExists { return .handOff }

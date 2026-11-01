@@ -18,13 +18,20 @@ BASE=${RECLAIMER_HOME:-$HOME/Games/ProjectGravemind}
 CACHE=${RECLAIMER_CACHE:-$BASE/downloads}
 STEAM_REL="drive_c/Program Files (x86)/Steam"
 MCC_REL="$STEAM_REL/steamapps/common/Halo The Master Chief Collection"
-GAME_FILES_REL="games/Halo The Master Chief Collection"
+GAME_FILES_REL="game/Halo The Master Chief Collection"
 GAME_FILES_DIR="$BASE/$GAME_FILES_REL"
 MCC_DIR="$GAME_FILES_DIR"
 MCC_CHECK_DIR="$GAME_FILES_DIR"
+PREVIOUS_GAME_FILES_DIR="$BASE/games/Halo The Master Chief Collection"
 LEGACY_MCC_DIR="$BASE/prefix-wine/$MCC_REL"
-if [ ! -e "$GAME_FILES_DIR" ] && [ -d "$LEGACY_MCC_DIR" ] && [ ! -L "$LEGACY_MCC_DIR" ]; then
-  MCC_CHECK_DIR="$LEGACY_MCC_DIR"
+if [ ! -e "$GAME_FILES_DIR" ]; then
+  if [ -d "$LEGACY_MCC_DIR" ] && [ ! -L "$LEGACY_MCC_DIR" ]; then
+    MCC_CHECK_DIR="$LEGACY_MCC_DIR"
+  elif [ -d "$PREVIOUS_GAME_FILES_DIR" ]; then
+    MCC_CHECK_DIR="$PREVIOUS_GAME_FILES_DIR"
+  elif [ -d "$LEGACY_MCC_DIR" ]; then
+    MCC_CHECK_DIR="$LEGACY_MCC_DIR"
+  fi
 fi
 MCC_APP=976730
 MCC_DEPOTS="976731 976735 976736 976737"  # MCC shared files + Halo 2 campaign + both multiplayer depots
@@ -34,7 +41,7 @@ WINE_PKG="wine-staging-11.18-osx64.tar.xz|https://github.com/Gcenx/macOS_Wine_bu
 DXVK_PKG="dxvk-macOS-async-v1.10.3-20230507-repack.tar.gz|https://github.com/Gcenx/DXVK-macOS/releases/download/v1.10.3-20230507-repack/dxvk-macOS-async-v1.10.3-20230507-repack.tar.gz|acd1520ad105d8ef124a09c8e11a259a5dc8bdc565ad18e0e52693f9807b2477"
 MOLTENVK_PKG="MoltenVK-macos-1.4.2.tar|https://github.com/KhronosGroup/MoltenVK/releases/download/v1.4.2/MoltenVK-macos.tar|f95765a6229cb7b915990a2890ce12ebe36a730b021545d3d52ae69ce4c4024e"
 DEPOT_PKG="DepotDownloader-macos-arm64.zip|https://github.com/SteamRE/DepotDownloader/releases/download/DepotDownloader_3.4.0/DepotDownloader-macos-arm64.zip|60e80c7c496f3f9a079cd3c62036b35d088c27bc0149baf38f009eb57a52f6a5"
-LAUNCHER_SHA=451935fa93a839ce6ff41aa594eb92b25da57e0e1507cbe7652174d4ad758c92  # launcher/ProjectReclaimer (built by scripts/make_launcher.sh)
+LAUNCHER_SHA=fbde785208e89a97a722487d53e57aa6cad5f965a1ca0befc7281c7643c99356  # launcher/ProjectReclaimer (built by scripts/make_launcher.sh)
 UPDATE=${RECLAIMER_UPDATE:-}
 GUI=${RECLAIMER_GUI:-}
 # give up on a stalled connection instead of hanging (the launcher waits for this when updating)
