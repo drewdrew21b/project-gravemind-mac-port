@@ -297,7 +297,7 @@ func renderStates(to dir: URL) {
         switch m.update {
         case .done(let summary):
             m.applicationUpdate = .done("0.8.3: up to date")
-            let gameStatus = summary.contains("0.18.373") ? "0.18.373: selected for this session"
+            let gameStatus = summary.contains("0.18.373") ? "0.18.373: pinned; automatic updates paused"
                 : summary.localizedCaseInsensitiveContains("updated") ? "0.18.412: updated"
                 : "0.18.412: up to date"
             m.gravemindUpdate = .done(gameStatus)
@@ -472,18 +472,31 @@ func renderStates(to dir: URL) {
     let m = Launcher()
     m.logging = false
     m.update = .done(upToDateStatus)
-    m.applicationUpdate = .done("Mac port 0.8.6: up to date")
+    m.applicationUpdate = .done("Mac port 0.8.7: up to date")
     m.gravemindUpdate = .done("Project Gravemind 0.18.412: up to date")
     m.tools.freeBytes = 41_000_000_000
     m.tools.mods = [ModItem(id: "1", title: "Ultimate Forge 2.0", bytes: 8_900_000_000),
                     ModItem(id: "2", title: "Warlock", bytes: 1_600_000_000),
                     ModItem(id: "3", title: "Halo 3 Foundation", bytes: 337_000_000)]
     m.tools.say("The report is on your Desktop: Project Gravemind report 2026-10-21 12.31.zip")
-    let halo2Path = "/Users/player/Games/ProjectGravemind/prefix-wine/drive_c/Program Files (x86)/Steam/steamapps/common/Halo The Master Chief Collection/halo2"
+    let halo2Path = "/Users/player/Games/ProjectGravemind/games/Halo The Master Chief Collection/halo2"
     let halo2 = GameItem(id: "halo2", title: "Halo 2", installed: true, bytes: 60_800_000_000, path: halo2Path)
     m.tools.games = [halo2]
     m.tools.mccBytes = 78_000_000_000
+    m.tools.applicationVersions = ApplicationVersions(chosen: nil, installed: "0.8.8", versions: [
+        .init(version: "0.8.10", date: "2026-11-01", downloaded: false),
+        .init(version: "0.8.9", date: "2026-10-25", downloaded: false),
+        .init(version: "0.8.8", date: "2026-10-01", downloaded: true),
+    ])
+    m.tools.versions = GameVersions(chosen: nil, installed: "0.18.412", versions: [])
     snapshot(ToolsSheet(launcher: m, t: m.tools), name: "30-tools", to: dir)
+    m.tools.applicationVersions = ApplicationVersions(chosen: "0.8.8", installed: "0.8.8", versions: [
+        .init(version: "0.8.10", date: "2026-11-01", downloaded: false),
+        .init(version: "0.8.9", date: "2026-10-25", downloaded: false),
+        .init(version: "0.8.8", date: "2026-10-01", downloaded: true),
+    ])
+    snapshot(ToolsSheet.VersionPickerSheet(launcher: m, tools: m.tools, component: .application),
+             name: "33-application-versions", to: dir)
     m.tools.games = [GameItem(id: "halo2", title: "Halo 2", installed: false, bytes: 0, path: halo2Path)]
     m.tools.result = nil
     snapshot(ToolsSheet(launcher: m, t: m.tools), name: "30-tools-no-halo2", to: dir)
@@ -513,7 +526,7 @@ func renderStates(to dir: URL) {
     v.tools.showVersions = true
     let today = ISO8601DateFormatter().string(from: Date()).prefix(10)
     let yesterday = ISO8601DateFormatter().string(from: Date().addingTimeInterval(-86400)).prefix(10)
-    v.tools.versions = GameVersions(chosen: "0.9.11", versions: [
+    v.tools.versions = GameVersions(chosen: "0.9.11", installed: "0.9.13", versions: [
         .init(version: "0.9.13", date: String(today), downloaded: true),
         .init(version: "0.9.12", date: String(today), downloaded: true),
         .init(version: "0.9.11", date: String(yesterday), downloaded: true),

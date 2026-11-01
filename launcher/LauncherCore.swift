@@ -4,8 +4,9 @@ import CoreGraphics
 import Foundation
 
 /// One line from `updater.py run`.
-enum UpdateComponent: String, Equatable {
+enum UpdateComponent: String, Equatable, Identifiable {
     case application, gravemind
+    var id: String { rawValue }
 }
 
 enum UpdaterEvent: Equatable {
@@ -219,10 +220,12 @@ func launchMode(home: URL, isInstalledApp: Bool, installedAppExists: Bool) -> La
     if !fm.fileExists(atPath: home.appendingPathComponent("version").path) {
         // a 1.0 install has its game files and no version file; a first install that stopped partway (window
         // closed, Mac restarted) left a marker, and carries on as Setup instead of a "one-time upgrade"
-        let mcc = "prefix-wine/drive_c/Program Files (x86)/Steam/steamapps/common/Halo The Master Chief Collection"
-        let halo2Folder = home.appendingPathComponent(mcc)
+        let halo2Folder = home.appendingPathComponent("games/Halo The Master Chief Collection")
+        let legacyHalo2Folder = home.appendingPathComponent(
+            "prefix-wine/drive_c/Program Files (x86)/Steam/steamapps/common/Halo The Master Chief Collection")
         let incomplete = home.appendingPathComponent(".setup-incomplete").path
-        return halo2FilesPresent(in: halo2Folder) && !fm.fileExists(atPath: incomplete) ? .upgrade : .setup
+        return (halo2FilesPresent(in: halo2Folder) || halo2FilesPresent(in: legacyHalo2Folder))
+            && !fm.fileExists(atPath: incomplete) ? .upgrade : .setup
     }
     if !isInstalledApp, installedAppExists { return .handOff }
     return .launcher
@@ -296,8 +299,8 @@ func relativeDay(_ day: String, now: Date = Date()) -> String {
     }
 }
 
-/// updater.py versions
-struct GameVersions: Decodable, Equatable {
+/// A version catalog from updater.py.
+struct VersionCatalog: Decodable, Equatable {
     struct Release: Decodable, Equatable, Identifiable {
         let version: String
         let date: String
@@ -305,8 +308,12 @@ struct GameVersions: Decodable, Equatable {
         var id: String { version }
     }
     let chosen: String?
+    let installed: String?
     let versions: [Release]
 }
+
+typealias GameVersions = VersionCatalog
+typealias ApplicationVersions = VersionCatalog
 
 // MARK: - failed joins
 

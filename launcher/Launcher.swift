@@ -8,6 +8,7 @@ import UserNotifications
 enum Step: Equatable {
     case waiting, working(String), done(String), warning(String), failed(String)
     var finished: Bool { if case .waiting = self { return false }; if case .working = self { return false }; return true }
+    var isWorking: Bool { if case .working = self { return true }; return false }
     var isWarning: Bool { if case .warning = self { return true }; return false }
     var isDone: Bool { if case .done = self { return true }; return false }
 }
@@ -87,6 +88,7 @@ final class Launcher: ObservableObject {
     @Published var showController = false
     /// An older Project Reclaimer the player chose for servers that haven't updated (nil: the newest).
     @Published var chosenVersion: String? { didSet { if chosenVersion != oldValue { log("chosen version: \(chosenVersion ?? "newest")") } } }
+    @Published var chosenApplicationVersion: String?
     let tools = ToolsModel()
     private var checkingCrash = false
 
@@ -128,6 +130,11 @@ final class Launcher: ObservableObject {
     private var installedGravemindVersion: String {
         ((try? String(contentsOf: gameDir.appendingPathComponent("gravemind/.release-version"), encoding: .utf8))
             ?? "unknown").trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+    private func applicationVersionPin() -> String? {
+        guard let value = try? String(contentsOf: home.appendingPathComponent("chosen-application-version"), encoding: .utf8)
+            .trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty else { return nil }
+        return value
     }
     private var startupPoll: LineProcess?      // `tools.py startup-state` while a game starts (one at a time)
     private var startupPollSince: Date?
@@ -188,6 +195,7 @@ final class Launcher: ObservableObject {
             if let h = games.first(where: { $0.id == "halo2" }) { self?.halo2Missing = !h.installed }
         }
         log("started (home \(home.path))")
+        chosenApplicationVersion = applicationVersionPin()
         timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { _ in
             MainActor.assumeIsolated { self.tick() }
         }
@@ -328,14 +336,23 @@ final class Launcher: ObservableObject {
         runUpdate(scope: component == .application ? .application : .gravemind)
     }
 
-    private func runUpdate(scope: UpdateScope = .startup) {
+    func useApplicationVersion(_ version: String, done: @escaping () -> Void = {}) {
+        guard !playing, update.finished, tools.busy == nil else { return }
+        runUpdate(scope: .application, commandOverride: ["use-application", version], completion: { [self] in
+            chosenApplicationVersion = applicationVersionPin()
+            done()
+        })
+    }
+
+    private func runUpdate(scope: UpdateScope = .startup, commandOverride: [String]? = nil,
+                           completion: (() -> Void)? = nil) {
         let isStartup = scope == .startup
         // right after restarting for a Mac port update, only the game is checked: never restart twice in a row
-        let command: String
+        let arguments: [String]
         switch scope {
-        case .startup: command = CommandLine.arguments.contains("--relaunched") ? "game" : "run"
-        case .application: command = "application"
-        case .gravemind: command = "game"
+        case .startup: arguments = [CommandLine.arguments.contains("--relaunched") ? "game" : "run"]
+        case .application: arguments = ["application"]
+        case .gravemind: arguments = ["game"]
         }
         update = .working("Checking for updates…")
         if isStartup {
@@ -351,7 +368,7 @@ final class Launcher: ObservableObject {
         updateStartedAt = Date()
         updateActivity = ProcessInfo.processInfo.beginActivity(options: .userInitiated,
                                                                reason: "Updating Project Gravemind")
-        updater = python("updater.py", [command], onLine: { [self] line in
+        updater = python("updater.py", commandOverride ?? arguments, onLine: { [self] line in
             switch UpdaterEvent(line: line) {
             case .status(let s): update = .working(s)
             case .progress(let v): gravemindUpdateProgress = v
@@ -394,6 +411,7 @@ final class Launcher: ObservableObject {
                 checkControllers()
                 checkSteam()
             }
+            completion?()
         })
         if updater == nil {
             updateEnded()
@@ -403,6 +421,7 @@ final class Launcher: ObservableObject {
                 checkControllers()
                 checkSteam()
             }
+            completion?()
         }
     }
 
@@ -601,11 +620,11 @@ final class Launcher: ObservableObject {
     }
 
     /// The game ended within seconds of Play: say so and let the player try again, instead of quietly closing.
-    /// Tools > Game version picked a release ("newest" for the latest): the next Play starts it.
+    /// A specific release stays pinned across launches; "newest" resumes automatic updates.
     func useVersion(_ version: String, progress: ((Double) -> Void)? = nil, done: @escaping (String?) -> Void) {
         let previous = update
-        update = .working(version == "newest" ? "Going back to the newest Project Reclaimer…"
-                                              : "Getting Project Reclaimer \(version)…")
+        update = .working(version == "newest" ? "Going back to the newest Project Gravemind…"
+                                              : "Getting Project Gravemind \(version)…")
         gravemindUpdate = .working(version == "newest" ? "Checking for the latest version…"
                                                         : "Downloading version \(version)…")
         gravemindUpdateProgress = nil
@@ -619,8 +638,8 @@ final class Launcher: ObservableObject {
             case .componentError(.gravemind, let s): gravemindUpdate = .warning(s); error = s
             case .done(let s) where s.hasPrefix("using "):
                 chosenVersion = String(s.dropFirst(6))
-                gravemindUpdate = .done("\(chosenVersion!): selected for this session")
-                update = .done("Playing an older Project Reclaimer (\(chosenVersion!)) for servers that haven't updated yet")
+                gravemindUpdate = .done("\(chosenVersion!): pinned; automatic updates paused")
+                update = .done("Using pinned Project Gravemind \(chosenVersion!)")
             case .done:
                 chosenVersion = nil
                 update = .done("Back on the newest version")

@@ -114,7 +114,7 @@ try? fm.createDirectory(at: h.appendingPathComponent("game"), withIntermediateDi
 try? fm.createDirectory(at: h.appendingPathComponent("wine"), withIntermediateDirectories: true)
 check(launchMode(home: h, isInstalledApp: false, installedAppExists: false) == .setup,
       "first install stopped before Halo 2 downloaded: Setup again, not Upgrade")
-let paks = h.appendingPathComponent("prefix-wine/drive_c/Program Files (x86)/Steam/steamapps/common/Halo The Master Chief Collection/halo2/preload/paks")
+let paks = h.appendingPathComponent("games/Halo The Master Chief Collection/halo2/preload/paks")
 try? fm.createDirectory(at: paks, withIntermediateDirectories: true)
 fm.createFile(atPath: paks.appendingPathComponent("campaign.pck").path, contents: Data())
 check(launchMode(home: h, isInstalledApp: true, installedAppExists: true) == .setup,
@@ -135,6 +135,16 @@ check(launchMode(home: h, isInstalledApp: false, installedAppExists: false) == .
       "first install stopped after the download (marker left): Setup again")
 try? fm.removeItem(at: h.appendingPathComponent(".setup-incomplete"))
 check(launchMode(home: h, isInstalledApp: true, installedAppExists: true) == .upgrade, "1.0 install")
+try? fm.removeItem(at: h.appendingPathComponent("games"))
+let legacyPaks = h.appendingPathComponent(
+      "prefix-wine/drive_c/Program Files (x86)/Steam/steamapps/common/Halo The Master Chief Collection/halo2/preload/paks")
+try? fm.createDirectory(at: legacyPaks, withIntermediateDirectories: true)
+fm.createFile(atPath: legacyPaks.appendingPathComponent("campaign.pck").path, contents: Data())
+let legacyMaps = legacyPaks.deletingLastPathComponent().deletingLastPathComponent()
+      .appendingPathComponent("h2_maps_win64_dx11")
+try? fm.createDirectory(at: legacyMaps, withIntermediateDirectories: true)
+fm.createFile(atPath: legacyMaps.appendingPathComponent("ascension.map").path, contents: Data())
+check(launchMode(home: h, isInstalledApp: true, installedAppExists: true) == .upgrade, "legacy prefix game files migrate")
 try? "1.2.0".write(to: h.appendingPathComponent("version"), atomically: true, encoding: .utf8)
 check(launchMode(home: h, isInstalledApp: false, installedAppExists: true) == .handOff, "DMG copy, installed")
 check(launchMode(home: h, isInstalledApp: false, installedAppExists: false) == .launcher, "DMG copy, app deleted")

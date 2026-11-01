@@ -4,6 +4,8 @@
   updater.py run    the Mac port (when GitHub has a newer VERSION, re-run its installer in update mode), then the game
     updater.py game   only the game: install the latest Project Gravemind release ZIP if needed
     updater.py application   only the Mac port: re-run its installer if a newer VERSION is available
+        updater.py application-versions   JSON: recent Mac-port releases
+        updater.py use-application <version|latest>   pin a Mac-port version, or resume automatic updates
     updater.py versions        JSON: recent Gravemind releases
     updater.py use <version>   install and select a specific Gravemind release; "use newest" returns to latest
 
@@ -36,10 +38,14 @@ GAME = BASE / "game"
 GAME_PACKAGE = GAME / "gravemind"
 VERSIONS = GAME / "versions"          # older Gravemind builds chosen for compatibility
 CHOSEN = GAME / "chosen-version"
+APP_CHOSEN = BASE / "chosen-application-version"
 RELEASE_API = os.environ.get("GRAVEMIND_RELEASE_API", "https://api.github.com/repos/BriRoz1/"
                              "h2gravemind-beta/releases/latest")
 RELEASES_API = os.environ.get("GRAVEMIND_RELEASES_API", "https://api.github.com/repos/BriRoz1/"
                               "h2gravemind-beta/releases?per_page=100")
+APP_RELEASES_API = os.environ.get("RECLAIMER_RELEASES_API", f"https://api.github.com/repos/{REPO}/releases?per_page=100")
+APP_TAG_RAW = os.environ.get("RECLAIMER_TAG_RAW", f"https://raw.githubusercontent.com/{REPO}")
+MIN_PINNABLE_APP_VERSION = "0.8.8"
 UA = {"User-Agent": "project-gravemind-mac-port"}
 COMPONENT_RESULTS = []
 
@@ -131,16 +137,31 @@ def component_summary():
     return "; ".join(COMPONENT_RESULTS)
 
 
-def update_port():
-    """Returns "current", "updated" (installer ran; the launcher was rebuilt) or raises."""
+def update_port(manual=False, target_version=None):
+    """Update the Mac port, respecting a selected version unless manually checking latest."""
     say("application-status: Checking for updates…")
-    raw = pinned_repo_raw()
-    latest = fetch(f"{raw}/VERSION").decode().strip()
-    if version_tuple(latest) <= version_tuple(installed_port_version()):
-        report_component("Mac port", installed_port_version(), "up to date")
+    installed = installed_port_version()
+    chosen = target_version or (APP_CHOSEN.read_text().strip() if APP_CHOSEN.is_file() and not manual else None)
+    if chosen and installed == chosen:
+        report_component("Mac port", chosen, "pinned")
         return "current"
+    if chosen:
+        application_release(chosen)
+        raw = f"{APP_TAG_RAW.rstrip('/')}/v{chosen}"
+        latest = fetch(f"{raw}/VERSION").decode().strip()
+        if latest != chosen:
+            raise RuntimeError(f"Mac-port tag v{chosen} contains version {latest}")
+    else:
+        raw = pinned_repo_raw()
+        latest = fetch(f"{raw}/VERSION").decode().strip()
+        if version_tuple(latest) <= version_tuple(installed):
+            if manual:
+                APP_CHOSEN.unlink(missing_ok=True)
+            report_component("Mac port", installed, "up to date")
+            return "current"
     say(f"status: Updating the Mac port to {latest}…")
     say(f"application-status: Updating to {latest}…")
+    updater_copy = Path(__file__).read_bytes() if chosen else None
     with tempfile.TemporaryDirectory() as tmp:
         script = Path(tmp) / "install.sh"
         script.write_bytes(fetch(f"{raw}/install.sh"))
@@ -173,7 +194,14 @@ def update_port():
         raise RuntimeError(re.sub(r"^Error: ", "", err.strip()))
     if installed_port_version() != latest:  # relaunching would only start the same update again
         raise RuntimeError(f"the update to {latest} didn't install; it will be tried again next time")
-    report_component("Mac port", latest, "updated")
+    if updater_copy is not None:
+        updater_path = GAME / "updater.py"
+        updater_path.parent.mkdir(parents=True, exist_ok=True)
+        updater_path.write_bytes(updater_copy)
+        updater_path.chmod(0o755)
+    if manual:
+        APP_CHOSEN.unlink(missing_ok=True)
+    report_component("Mac port", latest, "updated" if not chosen else "pinned")
     return "updated"
 
 
@@ -307,8 +335,39 @@ def versions():
     return json.dumps({"chosen": chosen, "versions": items})
 
 
+def application_release(version):
+    if not re.fullmatch(r"\d+(?:\.\d+){1,2}", version):
+        raise RuntimeError(f"{version} isn't a Mac-port version")
+    if version_tuple(version) < version_tuple(MIN_PINNABLE_APP_VERSION):
+        raise RuntimeError(f"Mac-port versions before {MIN_PINNABLE_APP_VERSION} can't be pinned safely")
+    release = next((r for r in fetch_json(APP_RELEASES_API)
+                    if r.get("tag_name") == f"v{version}" and not r.get("prerelease") and not r.get("draft")), None)
+    if release is None or not any(a.get("name") == "Project-Gravemind-Mac-Port.dmg" for a in release.get("assets", [])):
+        raise RuntimeError(f"Mac-port version {version} wasn't found")
+    return release
+
+
+def application_versions():
+    chosen = APP_CHOSEN.read_text().strip() if APP_CHOSEN.is_file() else None
+    installed = installed_port_version()
+    items = []
+    for release in fetch_json(APP_RELEASES_API):
+        if release.get("prerelease") or release.get("draft"):
+            continue
+        match = re.fullmatch(r"v(\d+(?:\.\d+){1,2})", str(release.get("tag_name", "")))
+        if not match or version_tuple(match.group(1)) < version_tuple(MIN_PINNABLE_APP_VERSION):
+            continue
+        if not any(a.get("name") == "Project-Gravemind-Mac-Port.dmg" for a in release.get("assets", [])):
+            continue
+        version = match.group(1)
+        items.append({"version": version, "date": str(release.get("published_at", ""))[:10],
+                      "downloaded": version == installed})
+    items.sort(key=lambda item: version_tuple(item["version"]), reverse=True)
+    return json.dumps({"chosen": chosen, "installed": installed, "versions": items})
+
+
 def use(version):
-    """Choose the release to play: an older one (downloaded once, then kept), or "newest"."""
+    """Pin a release to play: an older one (downloaded once, then kept), or "newest" to resume auto-updates."""
     if version == "newest":
         CHOSEN.unlink(missing_ok=True)
         return update_game()
@@ -328,11 +387,54 @@ def use(version):
         say(f"status: Downloading Project Gravemind {version}…")
         install_release(version, url, expected, target)
     CHOSEN.write_text(version + "\n")
-    report_component("Project Gravemind", version, "selected for this session")
+    report_component("Project Gravemind", version, "pinned; automatic updates paused")
     return "chosen"
 
 
+def use_application(version):
+    if version in ("latest", "newest"):
+        return update_port(manual=True)
+    application_release(version)
+    previous = APP_CHOSEN.read_text() if APP_CHOSEN.is_file() else None
+    APP_CHOSEN.parent.mkdir(parents=True, exist_ok=True)
+    APP_CHOSEN.write_text(version + "\n")
+    try:
+        return update_port(target_version=version)
+    except Exception:
+        if previous is None:
+            APP_CHOSEN.unlink(missing_ok=True)
+        else:
+            APP_CHOSEN.write_text(previous)
+        raise
+
+
 def main(argv):
+    if len(argv) == 2 and argv[1] == "application-versions":
+        try:
+            say(application_versions())
+            return 0
+        except Offline as e:
+            say(f"offline: {e}")
+            return 1
+        except Exception as e:
+            say(f"error: {e}")
+            return 1
+    if len(argv) == 3 and argv[1] == "use-application":
+        COMPONENT_RESULTS.clear()
+        try:
+            result = use_application(argv[2])
+        except Offline as e:
+            say(f"application-error: Can't connect: {e}")
+            say(f"error: Can't connect: {e}")
+            return 1
+        except Exception as e:
+            say(f"application-error: {e}")
+            say(f"error: {e}")
+            return 1
+        if result == "updated":
+            say("relaunch")
+        say(f"done: {component_summary() or 'Mac port ' + installed_port_version() + ': pinned'}")
+        return 0
     if len(argv) == 2 and argv[1] == "versions":
         try:
             say(versions())
@@ -376,10 +478,6 @@ def main(argv):
             fcntl.flock(lock, fcntl.LOCK_EX)
     say("status: Checking for updates…")
     results, errors, offline = {}, [], None
-    if argv[1] == "run":
-        # an older version is for this session only (Tools, or the window's "switch and rejoin"): opening the app
-        # again goes back to the newest, so nobody stays stuck on an old one
-        CHOSEN.unlink(missing_ok=True)
     if argv[1] == "game":
         steps = [update_game]
     elif argv[1] == "application":
@@ -390,7 +488,7 @@ def main(argv):
         if step is update_game and results.get("update_port") == "updated":
             break  # the new install.sh just updated the game with the new updater.py; this one's code is the old one
         try:
-            results[step.__name__] = step()
+            results[step.__name__] = step(manual=True) if step is update_port and argv[1] == "application" else step()
             sys.stderr.write(f"updater: {step.__name__}: {results[step.__name__]}\n")
         except Offline as e:
             sys.stderr.write(f"updater: {step.__name__}: can't connect: {e}\n")

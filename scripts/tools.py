@@ -34,7 +34,10 @@ GAME = BASE / "game"
 LOGS = BASE / "logs"
 STEAMAPPS = BASE / "prefix-wine" / "drive_c" / "Program Files (x86)" / "Steam" / "steamapps"
 WORKSHOP = STEAMAPPS / "workshop" / "content" / "976730"
-MCC_DIR = STEAMAPPS / "common" / "Halo The Master Chief Collection"
+CANONICAL_MCC_DIR = BASE / "games" / "Halo The Master Chief Collection"
+LEGACY_MCC_DIR = STEAMAPPS / "common" / "Halo The Master Chief Collection"
+MCC_DIR = (CANONICAL_MCC_DIR if CANONICAL_MCC_DIR.exists() or LEGACY_MCC_DIR.is_symlink()
+           else LEGACY_MCC_DIR if LEGACY_MCC_DIR.exists() else CANONICAL_MCC_DIR)
 APP = Path(os.environ.get("RECLAIMER_APP_PATH")
            or Path(os.environ.get("RECLAIMER_APPS_DIR", HOME / "Applications")) / "Project Gravemind.app")
 DESKTOP = Path(os.environ.get("RECLAIMER_DESKTOP", HOME / "Desktop"))
@@ -54,6 +57,12 @@ def say(line):
 _spec = importlib.util.spec_from_file_location("game_process", Path(__file__).resolve().parent / "game_process.py")
 game_process = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(game_process)
+
+_prefix_spec = importlib.util.spec_from_file_location("wine_prefix", Path(__file__).resolve().parent / "wine_prefix.py")
+wine_prefix = importlib.util.module_from_spec(_prefix_spec)
+_prefix_spec.loader.exec_module(wine_prefix)
+
+
 def game_running():
     return game_process.running(BASE)
 
@@ -305,6 +314,15 @@ def force_quit():
             return "ok"
         time.sleep(0.5)
     return "error: The game didn't stop. Restart your Mac (Apple menu > Restart) to close it."
+
+
+def rebuild_prefix():
+    if game_running():
+        return "error: Quit the game before rebuilding the Wine environment."
+    try:
+        return wine_prefix.rebuild_prefix(BASE)
+    except Exception as e:
+        return f"error: The Wine environment couldn't be rebuilt ({e})."
 
 
 def folder_size(path):
@@ -573,7 +591,7 @@ def uninstall():
 
 COMMANDS = {"controller-check": controller_check,
             "audio-check": audio_check, "crash-check": crash_check, "startup-state": startup_state,
-            "force-quit": force_quit, "mods": mods,
+            "force-quit": force_quit, "rebuild-prefix": rebuild_prefix, "mods": mods,
             "report": report, "debug-report": debug_report, "reset-graphics": reset_graphics, "forget-steam": forget_steam, "repair": repair,
             "games": games, "uninstall": uninstall}
 

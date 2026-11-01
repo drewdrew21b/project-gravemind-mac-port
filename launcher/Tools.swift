@@ -18,8 +18,10 @@ struct GameItem: Decodable, Identifiable, Equatable {
     let path: String
 }
 
-let mccFolder = home.appendingPathComponent(
+let canonicalMccFolder = home.appendingPathComponent("games/Halo The Master Chief Collection")
+let legacyMccFolder = home.appendingPathComponent(
     "prefix-wine/drive_c/Program Files (x86)/Steam/steamapps/common/Halo The Master Chief Collection")
+let mccFolder = FileManager.default.fileExists(atPath: canonicalMccFolder.path) ? canonicalMccFolder : legacyMccFolder
 
 @MainActor
 final class ToolsModel: ObservableObject {
@@ -31,6 +33,7 @@ final class ToolsModel: ObservableObject {
     @Published var repairRemaining: String?
     @Published var repairQR: QRGrid?
     @Published var versions: GameVersions?
+    @Published var applicationVersions: ApplicationVersions?
     @Published var showVersions = false
     @Published var games: [GameItem] = [] { didSet { onGames?(games) } }
     @Published var mccBytes: Int64 = 0              // the whole MCC folder, shared files included
@@ -78,7 +81,8 @@ final class ToolsModel: ObservableObject {
     func error(in line: String) -> String? { line.hasPrefix("error: ") ? String(line.dropFirst(7)) : nil }
 
     func loadVersions() {
-        busy = "Looking up Project Reclaimer versions…"
+        busy = "Looking up Project Gravemind versions…"
+        result = nil
         var listing: GameVersions?
         var problem: String?
         running = python("updater.py", ["versions"], onLine: { line in
@@ -89,6 +93,26 @@ final class ToolsModel: ObservableObject {
             running = nil
             versions = listing
             if listing == nil { say(problem == nil ? "The list of versions couldn't be loaded." : "Couldn't reach GitHub to list the versions. Check your internet connection.", ok: false) }
+        })
+    }
+
+    func loadApplicationVersions() {
+        busy = "Looking up Application versions…"
+        result = nil
+        var listing: ApplicationVersions?
+        var problem: String?
+        running = python("updater.py", ["application-versions"], onLine: { line in
+            if let data = line.data(using: .utf8),
+               let catalog = try? JSONDecoder().decode(ApplicationVersions.self, from: data) { listing = catalog }
+            if line.hasPrefix("offline: ") || line.hasPrefix("error: ") { problem = line }
+        }, onExit: { [self] _ in
+            busy = nil
+            running = nil
+            applicationVersions = listing
+            if listing == nil {
+                say(problem == nil ? "The Application version list couldn't be loaded."
+                    : "Couldn't reach GitHub to list Application versions. Check your internet connection.", ok: false)
+            }
         })
     }
 
@@ -191,18 +215,28 @@ struct ToolsSheet: View {
     @ObservedObject var t: ToolsModel
     @Environment(\.dismiss) private var dismiss
     @State private var confirm: Confirm?
+    @State private var versionTarget: UpdateComponent?
 
     enum Confirm: Identifiable {
-        case removeMod(ModItem), removeGame(GameItem), resetGraphics, switchSteam, uninstall
+        case removeMod(ModItem), removeGame(GameItem), resetGraphics, switchSteam, rebuildPrefix, uninstall
         var id: String {
             switch self {
             case .removeMod(let m): return "mod-\(m.id)"
             case .removeGame(let g): return "game-\(g.id)"
             case .resetGraphics: return "graphics"
             case .switchSteam: return "steam"
+            case .rebuildPrefix: return "rebuild-prefix"
             case .uninstall: return "uninstall"
             }
         }
+    }
+
+    private var maximumSheetHeight: CGFloat {
+        max(320, (NSScreen.main?.visibleFrame.height ?? 800) - 64)
+    }
+
+    private var maximumListHeight: CGFloat {
+        max(160, min(520, maximumSheetHeight - 240))
     }
 
     var body: some View {
@@ -240,6 +274,14 @@ struct ToolsSheet: View {
                                   progress: launcher.gravemindUpdateProgress) {
                             launcher.checkUpdate(.gravemind)
                         }
+                           versionRow("Application", chosen: launcher.chosenApplicationVersion) {
+                            versionTarget = .application
+                            t.loadApplicationVersions()
+                        }
+                           versionRow("Project Gravemind", chosen: launcher.chosenVersion) {
+                            versionTarget = .gravemind
+                            t.loadVersions()
+                        }
                     }
                     section("The game") {
                         tool("Force quit the game", "Force Quit",
@@ -250,6 +292,11 @@ struct ToolsSheet: View {
                                     t.say("The game was stopped.")
                                 } else { t.say(t.error(in: last) ?? "The game couldn't be stopped. Restart your Mac to close it.", ok: false) }
                             }
+                        }
+                        tool("Rebuild the Wine environment", "Rebuild…",
+                             "Recreates Wine without redownloading Halo 2. Wine settings and Workshop downloads are removed.",
+                             disabled: launcher.playing) {
+                            confirm = .rebuildPrefix
                         }
                     }
                     section("Installed games") {
@@ -281,13 +328,18 @@ struct ToolsSheet: View {
                     }
                 }
             }
-            .frame(maxHeight: 520)
+            .frame(maxHeight: maximumListHeight)
         }
         .padding(22)
-        .frame(width: 480)
+        .frame(minWidth: 440, idealWidth: 500, maxWidth: 680,
+               minHeight: min(360, maximumSheetHeight), idealHeight: min(720, maximumSheetHeight),
+               maxHeight: maximumSheetHeight)
 
         .onAppear { if launcher.logging { t.loadGames() } }  // (not in --render-states snapshots)
         .alert(item: $confirm) { c in alert(for: c) }
+        .sheet(item: $versionTarget) { component in
+            VersionPickerSheet(launcher: launcher, tools: t, component: component)
+        }
     }
 
     private func alert(for c: Confirm) -> Alert {
@@ -322,6 +374,18 @@ struct ToolsSheet: View {
                                  guard t.succeeded(last) else { return t.say("The Steam account couldn't be changed.", ok: false) }
                                  dismiss()
                                  launcher.signIn()
+                             }
+                         }, secondaryButton: .cancel())
+        case .rebuildPrefix:
+            return Alert(title: Text("Rebuild the Wine environment?"),
+                         message: Text("This replaces the Wine prefix and its settings, saves, and downloaded Workshop content. Halo 2 and MCC files in the separate games folder are kept."),
+                         primaryButton: .destructive(Text("Rebuild")) {
+                             t.run("Rebuilding the Wine environment…", ["rebuild-prefix"]) { last in
+                                 if t.succeeded(last) {
+                                     t.say("The Wine environment was rebuilt. Your Halo 2 files are unchanged.")
+                                 } else {
+                                     t.say(t.error(in: last) ?? "The Wine environment couldn't be rebuilt.", ok: false)
+                                 }
                              }
                          }, secondaryButton: .cancel())
         case .uninstall:
@@ -390,7 +454,7 @@ struct ToolsSheet: View {
     private func updateRow(_ title: String, step: Step, progress: Double?, action: @escaping () -> Void) -> some View {
         HStack(alignment: .top, spacing: 8) {
             StepRow(title: title, step: step,
-                    progress: progress ?? (step.isDone ? 1 : 0))
+                    progress: step.isWorking ? progress : nil)
                 .frame(maxWidth: .infinity, alignment: .leading)
             tip("Checks for and installs updates. Quit the game first.",
                 disabled: t.busy != nil || !launcher.update.finished || launcher.playing) {
@@ -400,6 +464,132 @@ struct ToolsSheet: View {
         .controlSize(.large)
     }
 
+    private func versionRow(_ title: String, chosen: String?, action: @escaping () -> Void) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text("\(title) version").font(.callout.weight(.semibold))
+                 Text(chosen.map { "Pinned at \($0) · automatic updates paused" }
+                     ?? "Latest · automatic updates on")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 8)
+            tip("Choose a release or enter a version. A specific version pauses automatic updates.",
+                disabled: t.busy != nil || !launcher.update.finished || launcher.playing) {
+                Button("Choose…", action: action)
+            }
+        }
+        .controlSize(.large)
+    }
+
+
+struct VersionPickerSheet: View {
+    @ObservedObject var launcher: Launcher
+    @ObservedObject var tools: ToolsModel
+    let component: UpdateComponent
+    @Environment(\.dismiss) private var dismiss
+    @State private var customVersion = ""
+
+    private var catalog: VersionCatalog? {
+        component == .application ? tools.applicationVersions : tools.versions
+    }
+
+    private var title: String { component == .application ? "Application version" : "Project Gravemind version" }
+
+    private var customVersionIsValid: Bool {
+        let pattern = component == .application ? #"^\d+(\.\d+){1,2}$"# : #"^\d+(\.\d+){1,3}$"#
+        guard customVersion.range(of: pattern, options: .regularExpression) != nil else { return false }
+        guard component == .application else { return true }
+        let parts = customVersion.split(separator: ".").compactMap { Int($0) }
+        let version = (0..<3).map { $0 < parts.count ? parts[$0] : 0 }
+        return !version.lexicographicallyPrecedes([0, 8, 8])
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                Text(title).font(.title2.bold())
+                Spacer()
+                Button("Done") { dismiss() }.keyboardShortcut(.cancelAction)
+            }
+            if let busy = tools.busy {
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small).tint(accent)
+                    Text(busy).font(.callout).foregroundStyle(.secondary)
+                }
+            }
+            if let result = tools.result, !result.ok {
+                Label(result.text, systemImage: "exclamationmark.triangle.fill")
+                    .font(.callout).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
+            }
+            if let catalog {
+                ScrollView {
+                    VStack(spacing: 0) {
+                        versionChoice("Latest", detail: "Automatic updates on", selected: catalog.chosen == nil) {
+                            choose("latest")
+                        }
+                        ForEach(catalog.versions.prefix(5)) { release in
+                            versionChoice(release.version,
+                                          detail: release.downloaded ? "Installed · \(release.date)" : release.date,
+                                          selected: catalog.chosen == release.version) {
+                                choose(release.version)
+                            }
+                        }
+                    }
+                }
+                .frame(maxHeight: 250)
+                HStack(spacing: 8) {
+                    TextField(component == .application ? "Custom version (0.8.8 or later)" : "Custom version", text: $customVersion)
+                        .textFieldStyle(.roundedBorder)
+                    Button("Use version") { choose(customVersion) }
+                        .disabled(!customVersionIsValid || tools.busy != nil || launcher.playing || !launcher.update.finished)
+                }
+            } else if tools.busy == nil {
+                Label("The version list isn't available.", systemImage: "exclamationmark.triangle")
+                    .font(.callout).foregroundStyle(.secondary)
+                Button("Try again") { loadCatalog() }
+            }
+        }
+        .padding(22)
+        .frame(width: 440)
+    }
+
+    private func versionChoice(_ version: String, detail: String, selected: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 10) {
+                Image(systemName: selected ? "checkmark.circle.fill" : "circle")
+                    .foregroundStyle(selected ? accent : Color.secondary)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(version).font(.callout.weight(.semibold))
+                    Text(detail).font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer()
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .padding(.vertical, 8)
+        .disabled(tools.busy != nil || launcher.playing || !launcher.update.finished)
+    }
+
+    private func loadCatalog() {
+        if component == .application { tools.loadApplicationVersions() }
+        else { tools.loadVersions() }
+    }
+
+    private func choose(_ version: String) {
+        if component == .application {
+            launcher.useApplicationVersion(version == "latest" ? "latest" : version) {
+                tools.loadApplicationVersions()
+            }
+        } else {
+            launcher.useVersion(version == "latest" ? "newest" : version) { error in
+                if error == nil { tools.loadVersions() }
+            }
+        }
+        dismiss()
+    }
+}
     /// A button with a tooltip that also shows while it's greyed out: macOS gives a disabled button none, so a clear
     /// layer on top takes the hover instead.
     private func tip<B: View>(_ text: String, disabled: Bool, @ViewBuilder _ button: () -> B) -> some View {
@@ -418,6 +608,7 @@ struct ToolsSheet: View {
     }
 
     private func tool(_ title: String, _ button: String, _ detail: String, role: ButtonRole? = nil,
+                      disabled: Bool = false,
                       action: @escaping () -> Void) -> some View {
         HStack(alignment: .top, spacing: 12) {
             VStack(alignment: .leading, spacing: 3) {
@@ -426,7 +617,7 @@ struct ToolsSheet: View {
             }
             Spacer(minLength: 8)
             Button(button, role: role, action: action).controlSize(.large).fixedSize()
-                .disabled(t.busy != nil || !launcher.update.finished)  // one at a time, and never mid-update
+                .disabled(t.busy != nil || !launcher.update.finished || disabled)  // one at a time, and never mid-update
         }
     }
 }

@@ -27,7 +27,7 @@ class ToolsTest(unittest.TestCase):
         for d in ("game", "logs", "tools", WORKSHOP / "content" / "976730"):
             (self.home / d).mkdir(parents=True)
         # the helper scripts sit next to tools.py in an install's game folder
-        for f in ("workshop_helper.py", "presets.py", "fit.py", "game_process.py"):
+        for f in ("workshop_helper.py", "presets.py", "fit.py", "game_process.py", "wine_prefix.py"):
             shutil.copy(REPO / "scripts" / f, self.home / "game" / f)
         shutil.copy(TOOLS, self.home / "game" / "tools.py")
         self.apps = self.tmp / "Applications"
@@ -354,7 +354,7 @@ class ToolsTest(unittest.TestCase):
         self.assertFalse((self.home / "steam-account").exists())
 
     def fake_mcc(self, halo2=True, multiplayer=True):
-        mcc = self.home / "prefix-wine/drive_c/Program Files (x86)/Steam/steamapps/common/Halo The Master Chief Collection"
+        mcc = self.home / "games/Halo The Master Chief Collection"
         (mcc / "MCC").mkdir(parents=True)
         (mcc / "MCC" / "shared.pak").write_bytes(b"x" * 500)
         (mcc / ".DepotDownloader").mkdir()
@@ -371,6 +371,77 @@ class ToolsTest(unittest.TestCase):
             for depot in ("976736_4", "976737_5"):
                 (mcc / ".DepotDownloader" / f"{depot}.manifest").write_bytes(b"m")
         return mcc
+
+    def test_legacy_mcc_files_move_to_separate_directory_and_link_back(self):
+        tools = self.load()
+        legacy = self.home / "prefix-wine/drive_c/Program Files (x86)/Steam/steamapps/common/Halo The Master Chief Collection"
+        legacy.mkdir(parents=True)
+        (legacy / "halo2.map").write_bytes(b"map")
+
+        separate = tools.wine_prefix.ensure_game_files_link(self.home)
+
+        self.assertEqual((separate / "halo2.map").read_bytes(), b"map")
+        self.assertTrue(legacy.is_symlink())
+        self.assertEqual(legacy.resolve(), separate.resolve())
+
+    def test_rebuild_prefix_preserves_separate_game_files(self):
+        tools = self.load()
+        legacy = self.home / "prefix-wine/drive_c/Program Files (x86)/Steam/steamapps/common/Halo The Master Chief Collection"
+        legacy.mkdir(parents=True)
+        (legacy / "ascension.map").write_bytes(b"halo2 files")
+        prefix = self.home / "prefix-wine"
+        (prefix / "system.reg").write_text("old prefix")
+        wine_bin = self.home / "wine/Wine Staging.app/Contents/Resources/wine/bin"
+        wine_bin.mkdir(parents=True)
+        (wine_bin / "wine").touch()
+        (wine_bin / "wineserver").touch()
+        dxvk = self.home / "downloads/dxvk-macOS-async-v1.10.3-20230507-repack/x64"
+        dxvk.mkdir(parents=True)
+        (dxvk / "d3d10core.dll").write_bytes(b"core")
+        (dxvk / "d3d11.dll").write_bytes(b"x" * 1_000_001)
+
+        def fake_runner(command, **kwargs):
+            if "wineboot" in command:
+                (prefix / "system.reg").write_text("new prefix")
+            elif "reg" in command:
+                with (prefix / "system.reg").open("a") as registry:
+                    registry.write('"DisableHidraw"=dword:00000001\n')
+            return subprocess.CompletedProcess(command, 0, "", "")
+
+        result = tools.wine_prefix.prepare_prefix(self.home, rebuild=True, install_dxvk=True, runner=fake_runner)
+
+        separate = self.home / "games/Halo The Master Chief Collection"
+        link = prefix / "drive_c/Program Files (x86)/Steam/steamapps/common/Halo The Master Chief Collection"
+        self.assertEqual(result, "ok")
+        self.assertEqual((separate / "ascension.map").read_bytes(), b"halo2 files")
+        self.assertTrue(link.is_symlink())
+        self.assertEqual(link.resolve(), separate.resolve())
+        registry = (prefix / "system.reg").read_text()
+        self.assertIn("new prefix", registry)
+        self.assertIn('"DisableHidraw"=dword:00000001', registry)
+        self.assertEqual((prefix / "drive_c/windows/system32/d3d10core.dll").read_bytes(), b"core")
+        self.assertEqual((prefix / "drive_c/windows/system32/d3d11.dll").stat().st_size, 1_000_001)
+
+    def test_rebuild_prefix_refuses_while_game_is_running(self):
+        tools = self.load()
+        (self.home / "prefix-wine/system.reg").write_text("leave this prefix alone")
+        with mock.patch.object(tools, "game_running", return_value=True):
+            result = tools.rebuild_prefix()
+        self.assertIn("Quit the game", result)
+        self.assertEqual((self.home / "prefix-wine/system.reg").read_text(), "leave this prefix alone")
+
+    def test_prefix_symlink_is_refused_without_touching_target(self):
+        tools = self.load()
+        external = self.tmp / "external-prefix"
+        external.mkdir()
+        (external / "keep.txt").write_text("keep")
+        shutil.rmtree(self.home / "prefix-wine")
+        (self.home / "prefix-wine").symlink_to(external, target_is_directory=True)
+
+        with self.assertRaisesRegex(RuntimeError, "is a symlink"):
+            tools.wine_prefix.ensure_game_files_link(self.home)
+
+        self.assertEqual((external / "keep.txt").read_text(), "keep")
 
     def test_games_lists_halo2_campaign_files(self):
         mcc = self.fake_mcc()

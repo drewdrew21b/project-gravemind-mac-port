@@ -52,8 +52,8 @@ class InstallGuiTest(unittest.TestCase):
     def test_campaign_only_install_only_needs_space_for_multiplayer(self):
         self.fake("df", 'echo "Filesystem 1G-blocks Used Available"; echo "/dev/disk3 900 865 35"')
         self.fake("curl", "exit 6")
-        paks = (self.tmp / "home" / "prefix-wine/drive_c/Program Files (x86)/Steam/steamapps/common"
-                / "Halo The Master Chief Collection" / "halo2" / "preload" / "paks")
+        paks = (self.tmp / "home" / "games" / "Halo The Master Chief Collection"
+            / "halo2" / "preload" / "paks")
         paks.mkdir(parents=True)
         (paks / "campaign.pck").write_bytes(b"campaign")
         rc, errors = self.run_install(RECLAIMER_MCC_FROM="")

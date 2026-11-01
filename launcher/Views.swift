@@ -270,16 +270,17 @@ struct HelpPanel: View {
 
 struct ContentView: View {
     @ObservedObject var m: Launcher
+    @State private var toolsDetent: PresentationDetent = .large
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             header
             VStack(alignment: .leading, spacing: 14) {
                 StepRow(title: "Application", step: m.applicationUpdate,
-                    progress: m.applicationUpdateProgress ?? (m.applicationUpdate.isDone ? 1 : 0))
+                    progress: m.applicationUpdate.isWorking ? m.applicationUpdateProgress : nil)
                 Divider()
                 StepRow(title: "Project Gravemind", step: m.gravemindUpdate,
-                    progress: m.gravemindUpdateProgress ?? (m.gravemindUpdate.isDone ? 1 : 0))
+                    progress: m.gravemindUpdate.isWorking ? m.gravemindUpdateProgress : nil)
                 if m.chosenVersion != nil, !m.playing, m.update.finished {
                     Button("Back to the newest version") { m.useVersion("newest") { _ in } }
                         .padding(.leading, 34)
@@ -355,7 +356,11 @@ struct ContentView: View {
         }
         .padding(24)
         .frame(width: 540)
-        .sheet(isPresented: $m.showTools) { ToolsSheet(launcher: m, t: m.tools) }
+        .sheet(isPresented: $m.showTools) {
+            ToolsSheet(launcher: m, t: m.tools)
+                .presentationDetents([.medium, .large], selection: $toolsDetent)
+                .presentationDragIndicator(.visible)
+        }
         .sheet(isPresented: $m.showController) { ControllerSheet(launcher: m) }
     }
 

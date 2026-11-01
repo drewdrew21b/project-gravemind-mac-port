@@ -18,7 +18,14 @@ BASE=${RECLAIMER_HOME:-$HOME/Games/ProjectGravemind}
 CACHE=${RECLAIMER_CACHE:-$BASE/downloads}
 STEAM_REL="drive_c/Program Files (x86)/Steam"
 MCC_REL="$STEAM_REL/steamapps/common/Halo The Master Chief Collection"
-MCC_DIR="$BASE/prefix-wine/$MCC_REL"
+GAME_FILES_REL="games/Halo The Master Chief Collection"
+GAME_FILES_DIR="$BASE/$GAME_FILES_REL"
+MCC_DIR="$GAME_FILES_DIR"
+MCC_CHECK_DIR="$GAME_FILES_DIR"
+LEGACY_MCC_DIR="$BASE/prefix-wine/$MCC_REL"
+if [ ! -e "$GAME_FILES_DIR" ] && [ -d "$LEGACY_MCC_DIR" ] && [ ! -L "$LEGACY_MCC_DIR" ]; then
+  MCC_CHECK_DIR="$LEGACY_MCC_DIR"
+fi
 MCC_APP=976730
 MCC_DEPOTS="976731 976735 976736 976737"  # MCC shared files + Halo 2 campaign + both multiplayer depots
 
@@ -27,7 +34,7 @@ WINE_PKG="wine-staging-11.18-osx64.tar.xz|https://github.com/Gcenx/macOS_Wine_bu
 DXVK_PKG="dxvk-macOS-async-v1.10.3-20230507-repack.tar.gz|https://github.com/Gcenx/DXVK-macOS/releases/download/v1.10.3-20230507-repack/dxvk-macOS-async-v1.10.3-20230507-repack.tar.gz|acd1520ad105d8ef124a09c8e11a259a5dc8bdc565ad18e0e52693f9807b2477"
 MOLTENVK_PKG="MoltenVK-macos-1.4.2.tar|https://github.com/KhronosGroup/MoltenVK/releases/download/v1.4.2/MoltenVK-macos.tar|f95765a6229cb7b915990a2890ce12ebe36a730b021545d3d52ae69ce4c4024e"
 DEPOT_PKG="DepotDownloader-macos-arm64.zip|https://github.com/SteamRE/DepotDownloader/releases/download/DepotDownloader_3.4.0/DepotDownloader-macos-arm64.zip|60e80c7c496f3f9a079cd3c62036b35d088c27bc0149baf38f009eb57a52f6a5"
-LAUNCHER_SHA=73d6ba057cd3a57db62fe5a644c12b0f74a890094131d525a02fee59eeafbe7e  # launcher/ProjectReclaimer (built by scripts/make_launcher.sh)
+LAUNCHER_SHA=451935fa93a839ce6ff41aa594eb92b25da57e0e1507cbe7652174d4ad758c92  # launcher/ProjectReclaimer (built by scripts/make_launcher.sh)
 UPDATE=${RECLAIMER_UPDATE:-}
 GUI=${RECLAIMER_GUI:-}
 # give up on a stalled connection instead of hanging (the launcher waits for this when updating)
@@ -77,20 +84,12 @@ installed() {  # installed <name> <version>: true when <name> is already install
 
 mark_installed() { mkdir -p "$BASE/.installed"; printf '%s\n' "$2" > "$BASE/.installed/$1"; }
 
-unlink_documents() {  # give a prefix its own Documents folder instead of Wine's link to ~/Documents
-  local d
-  for d in "$1"/drive_c/users/*/Documents; do
-    [ -L "$d" ] && { rm "$d"; mkdir -p "$d"; }
-  done
-  return 0
-}
-
 halo2_campaign_present() {
-  [ -n "$(find "$MCC_DIR/halo2/preload/paks" -name '*.pck' -print -quit 2>/dev/null)" ]
+  [ -n "$(find "$MCC_CHECK_DIR/halo2/preload/paks" -name '*.pck' -print -quit 2>/dev/null)" ]
 }
 
 halo2_multiplayer_present() {
-  [ -f "$MCC_DIR/halo2/h2_maps_win64_dx11/ascension.map" ]
+  [ -f "$MCC_CHECK_DIR/halo2/h2_maps_win64_dx11/ascension.map" ]
 }
 
 halo2_files_present() { halo2_campaign_present && halo2_multiplayer_present; }
@@ -157,7 +156,7 @@ fi
 note "ok"
 
 bold "Game scripts and Steam downloader helper"
-for f in run.sh launch.sh gamecontrollerdb.txt game_process.py workshop_helper.py updater.py tools.py; do
+for f in run.sh launch.sh gamecontrollerdb.txt game_process.py workshop_helper.py updater.py tools.py wine_prefix.py; do
   script_file "scripts/$f" "$BASE/game/$f"
 done
 chmod +x "$BASE/game/run.sh" "$BASE/game/launch.sh" "$BASE/game/workshop_helper.py" "$BASE/game/updater.py" \
@@ -173,20 +172,9 @@ RECLAIMER_HOME="$BASE" /usr/bin/python3 -I "$BASE/game/updater.py" game 2>>"$BAS
   die "Could not download Project Gravemind. Check your internet connection and run the installer again."
 
 bold "Windows environment for the Wine version"
-WINE_BIN="$BASE/wine/Wine Staging.app/Contents/Resources/wine/bin"
-if [ ! -f "$BASE/prefix-wine/system.reg" ]; then
-  # (mscoree/mshtml off: no Wine Mono/Gecko install dialogs; the game doesn't use them)
-  WINEPREFIX="$BASE/prefix-wine" WINEDEBUG=-all WINEDLLOVERRIDES="mscoree,mshtml=" "$WINE_BIN/wine" wineboot -i >/dev/null 2>&1 || true
-  WINEPREFIX="$BASE/prefix-wine" WINEDEBUG=-all "$WINE_BIN/wineserver" -w
-fi
-# controllers come to the game from SDL. For PlayStation pads Wine otherwise drops SDL's gamepad for a raw PS device
-# ("hidraw"), which the game can't use: "no gamepad detected" (#17). Xbox and other pads come from SDL either way.
-if ! grep -q '"DisableHidraw"=dword:00000001' "$BASE/prefix-wine/system.reg" 2>/dev/null; then
-  WINEPREFIX="$BASE/prefix-wine" WINEDEBUG=-all "$WINE_BIN/wine" reg add 'HKLM\System\CurrentControlSet\Services\winebus' \
-    /v DisableHidraw /t REG_DWORD /d 1 /f >/dev/null 2>&1 || true
-  WINEPREFIX="$BASE/prefix-wine" WINEDEBUG=-all "$WINE_BIN/wineserver" -w
-fi
-unlink_documents "$BASE/prefix-wine"
+RECLAIMER_HOME="$BASE" /usr/bin/python3 -I "$BASE/game/wine_prefix.py" prepare \
+  2>>"$BASE/logs/launcher.log" || die "Could not prepare the Wine environment. Re-run the installer and try again."
+MCC_CHECK_DIR="$GAME_FILES_DIR"
 # DXVK-macOS goes into this prefix's system32 so the shared game folder stays free of graphics DLLs.
 SYS32="$BASE/prefix-wine/drive_c/windows/system32"
 if ! installed dxvk "${DXVK_PKG%%|*}" || [ "$(stat -f %z "$SYS32/d3d11.dll" 2>/dev/null || echo 0)" -lt 1000000 ]; then  # (Wine's own 14 KB stub is not DXVK)

@@ -38,6 +38,9 @@ class UpdaterTest(unittest.TestCase):
         self.assets.mkdir()
         self.latest_api = self.tmp / "latest.json"
         self.releases_api = self.tmp / "releases.json"
+        self.app_releases_api = self.tmp / "app-releases.json"
+        self.app_tags = self.tmp / "app-tags"
+        self.app_tags.mkdir()
         self.latest_zip = package_bytes()
         self.old_zip = package_bytes(b"MZ older Gravemind")
         (self.assets / "latest.zip").write_bytes(self.latest_zip)
@@ -49,9 +52,16 @@ class UpdaterTest(unittest.TestCase):
             "tag_name": "v0.19.0-rc1", "prerelease": True, "draft": False,
             "published_at": "2026-10-11T00:00:00Z", "assets": []
         }]))
+        self.app_releases_api.write_text(json.dumps([
+            self.app_release("v0.8.10"), self.app_release("v0.8.9"), self.app_release("v0.8.8"),
+            self.app_release("v0.8.7"), self.app_release("v0.9.0-rc1", prerelease=True),
+            self.app_release("v0.8.5", draft=True),
+        ]))
         self.env = dict(os.environ, RECLAIMER_HOME=str(self.home),
                         GRAVEMIND_RELEASE_API=self.latest_api.as_uri(),
                         GRAVEMIND_RELEASES_API=self.releases_api.as_uri(),
+                        RECLAIMER_RELEASES_API=self.app_releases_api.as_uri(),
+                        RECLAIMER_TAG_RAW=self.app_tags.as_uri(),
                         GRAVEMIND_GAME_PROCESS=r"not-a-real-game-process")
 
     def tearDown(self):
@@ -63,6 +73,12 @@ class UpdaterTest(unittest.TestCase):
                 "prerelease": False, "draft": False,
                 "assets": [{"name": "h2gravemind_beta.zip", "digest": f"sha256:{sha(content)}",
                             "browser_download_url": archive.as_uri()}]}
+
+    @staticmethod
+    def app_release(tag, prerelease=False, draft=False):
+        return {"tag_name": tag, "published_at": "2026-10-10T13:20:51Z",
+                "prerelease": prerelease, "draft": draft,
+                "assets": [{"name": "Project-Gravemind-Mac-Port.dmg"}]}
 
     def run_updater(self, *args, **env):
         process = subprocess.run([sys.executable, "-I", str(UPDATER), *args],
@@ -132,6 +148,7 @@ class UpdaterTest(unittest.TestCase):
     def test_application_update_relaunches_without_checking_gravemind(self):
         self.home.mkdir()
         (self.home / "version").write_text("0.8.3\n")
+        (self.home / "chosen-application-version").write_text("0.8.8\n")
         raw = self.tmp / "port-release"
         raw.mkdir()
         (raw / "VERSION").write_text("0.8.4\n")
@@ -146,6 +163,54 @@ class UpdaterTest(unittest.TestCase):
         self.assertIn("application-done: 0.8.4: updated", output)
         self.assertIn("relaunch", output)
         self.assertFalse(any(line.startswith("gravemind-") for line in output), output)
+        self.assertFalse((self.home / "chosen-application-version").exists())
+
+    def test_application_versions_lists_supported_stable_releases(self):
+        rc, output = self.run_updater("application-versions")
+
+        self.assertEqual(rc, 0, output)
+        listing = json.loads(output[-1])
+        self.assertEqual([item["version"] for item in listing["versions"]], ["0.8.10", "0.8.9", "0.8.8"])
+        self.assertIsNone(listing["chosen"])
+
+    def test_application_pin_downgrades_and_preserves_current_updater(self):
+        self.home.mkdir()
+        (self.home / "version").write_text("0.8.9\n")
+        tag = self.app_tags / "v0.8.8"
+        tag.mkdir()
+        (tag / "VERSION").write_text("0.8.8\n")
+        (tag / "install.sh").write_text(
+            "#!/bin/bash\n"
+            "printf '%s\\n' \"$RECLAIMER_EXPECT_VERSION\" > \"$RECLAIMER_HOME/version\"\n"
+            "mkdir -p \"$RECLAIMER_HOME/game\"\n"
+            "printf 'old updater\\n' > \"$RECLAIMER_HOME/game/updater.py\"\n"
+        )
+
+        rc, output = self.run_updater("use-application", "0.8.8")
+
+        self.assertEqual(rc, 0, output)
+        self.assertIn("application-done: 0.8.8: pinned", output)
+        self.assertIn("relaunch", output)
+        self.assertEqual((self.home / "chosen-application-version").read_text().strip(), "0.8.8")
+        self.assertEqual((self.home / "version").read_text().strip(), "0.8.8")
+        self.assertEqual((self.home / "game" / "updater.py").read_bytes(), UPDATER.read_bytes())
+
+        raw = self.tmp / "port-latest"
+        raw.mkdir()
+        (raw / "VERSION").write_text("0.8.9\n")
+        rc, output = self.run_updater("run", RECLAIMER_REPO_RAW=raw.as_uri())
+
+        self.assertEqual(rc, 0, output)
+        self.assertIn("Mac port 0.8.8: pinned", output[-1])
+        self.assertEqual((self.home / "version").read_text().strip(), "0.8.8")
+        self.assertFalse(any(line.startswith("application-progress:") for line in output), output)
+
+    def test_application_version_before_manual_update_floor_is_rejected(self):
+        rc, output = self.run_updater("use-application", "0.8.6")
+
+        self.assertNotEqual(rc, 0)
+        self.assertIn("can't be pinned safely", output[-1])
+        self.assertFalse((self.home / "chosen-application-version").exists())
 
     def test_modified_executable_is_repaired_from_verified_release(self):
         self.run_updater("game")
@@ -194,10 +259,24 @@ class UpdaterTest(unittest.TestCase):
         self.assertIsNone(listing["chosen"])
         rc, output = self.run_updater("use", "0.18.373")
         self.assertEqual(rc, 0, output)
-        self.assertIn("gravemind-done: 0.18.373: selected for this session", output)
+        self.assertIn("gravemind-done: 0.18.373: pinned; automatic updates paused", output)
         self.assertEqual(output[-1], "done: using 0.18.373")
         self.assertEqual((self.home / "game" / "versions" / "v0.18.373" / "h2gravemind.exe").read_bytes(),
                          b"MZ older Gravemind")
+        self.assertEqual((self.home / "game" / "chosen-version").read_text().strip(), "0.18.373")
+
+    def test_selected_gravemind_version_stays_pinned_on_startup(self):
+        self.run_updater("use", "0.18.373")
+        self.home.mkdir(exist_ok=True)
+        (self.home / "version").write_text("0.8.6\n")
+        raw = self.tmp / "port-release"
+        raw.mkdir()
+        (raw / "VERSION").write_text("0.8.6\n")
+
+        rc, output = self.run_updater("run", RECLAIMER_REPO_RAW=raw.as_uri())
+
+        self.assertEqual(rc, 0, output)
+        self.assertEqual(output[-1], "done: using 0.18.373")
         self.assertEqual((self.home / "game" / "chosen-version").read_text().strip(), "0.18.373")
 
     def test_stopping_a_port_update_stops_the_installer_and_its_downloads(self):

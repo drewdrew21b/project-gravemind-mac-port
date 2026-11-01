@@ -2,6 +2,12 @@
 
 Changes since the port moved from Project Reclaimer (Halo 3) to Project Gravemind (Halo 2).
 
+## 0.8.11
+- Tools now fit within the screen and can be resized between compact and expanded heights.
+- Tools can pin a specific Application or Project Gravemind version; choosing Latest resumes automatic updates.
+- MCC files are stored outside the Wine prefix, and Tools can rebuild the prefix without redownloading them.
+- Completed update progress bars now disappear when an update finishes.
+
 ## 0.8.7
 - Tools can manually check for Application and Project Gravemind updates without waiting for the next launch.
 
