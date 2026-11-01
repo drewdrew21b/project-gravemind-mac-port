@@ -679,6 +679,23 @@ func knownLayout(vendor: Int) -> [String: String]? {
     }
 }
 
+func nintendoXboxLayoutFlag(home: URL) -> URL {
+    home.appendingPathComponent("nintendo-xbox-layout")
+}
+
+func isNintendoXboxLayout(home: URL) -> Bool {
+    FileManager.default.fileExists(atPath: nintendoXboxLayoutFlag(home: home).path)
+}
+
+func setNintendoXboxLayout(_ enabled: Bool, home: URL) {
+    let flag = nintendoXboxLayoutFlag(home: home)
+    if enabled {
+        try? "".write(to: flag, atomically: true, encoding: .utf8)
+    } else {
+        try? FileManager.default.removeItem(at: flag)
+    }
+}
+
 /// Buttons as the controller window numbers those it reads through Apple's GameController framework.
 enum GCButton: Int, CaseIterable {
     case a, b, x, y, leftShoulder, rightShoulder, back, start, guide, leftStick, rightStick

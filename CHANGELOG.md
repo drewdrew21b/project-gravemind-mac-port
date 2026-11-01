@@ -2,6 +2,9 @@
 
 Changes since the port moved from Project Reclaimer (Halo 3) to Project Gravemind (Halo 2).
 
+## 0.8.6
+- Nintendo controllers can use Xbox-positioned face buttons, configurable in the controller window.
+
 ## 0.8.5
  - Gravemind now comes from `BriRoz1/h2gravemind-beta`; the updater checks its releases and verifies each ZIP's SHA-256.
 

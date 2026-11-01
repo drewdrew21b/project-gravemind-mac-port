@@ -530,6 +530,15 @@ class ToolsTest(unittest.TestCase):
             (tools.BASE / "controller-mappings-active.txt").unlink(missing_ok=True)
             env = tools.game_env()
             self.assertNotIn("SDL_GAMECONTROLLERCONFIG_FILE", env)
+            self.assertNotIn("SDL_GAMECONTROLLER_USE_BUTTON_LABELS", env)
+
+    def test_game_env_uses_positional_nintendo_layout_when_flag_exists(self):
+        spec = importlib.util.spec_from_file_location("tools", str(self.home / "game" / "tools.py"))
+        tools = importlib.util.module_from_spec(spec)
+        with mock.patch.dict(os.environ, {"RECLAIMER_HOME": str(self.home)}):
+            spec.loader.exec_module(tools)
+            (tools.BASE / "nintendo-xbox-layout").touch()
+            self.assertEqual(tools.game_env().get("SDL_GAMECONTROLLER_USE_BUTTON_LABELS"), "0")
 
 
 if __name__ == "__main__":

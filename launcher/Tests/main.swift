@@ -247,6 +247,14 @@ check(knownLayout(vendor: 0x045E)?["x"] == "b3" && knownLayout(vendor: 0x045E)?[
 check(knownLayout(vendor: 0x057E)?["a"] == "b0" && knownLayout(vendor: 0x057E)?["b"] == "b1"
       && knownLayout(vendor: 0x057E)?["x"] == "b2", "Nintendo layout")
 check(knownLayout(vendor: 0x1234) == nil, "unknown pads keep the unmapped view")
+let layoutHome = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent(UUID().uuidString)
+try? FileManager.default.createDirectory(at: layoutHome, withIntermediateDirectories: true)
+check(!isNintendoXboxLayout(home: layoutHome), "Nintendo positional layout defaults off")
+setNintendoXboxLayout(true, home: layoutHome)
+check(isNintendoXboxLayout(home: layoutHome), "Nintendo positional layout flag enables")
+setNintendoXboxLayout(false, home: layoutHome)
+check(!isNintendoXboxLayout(home: layoutHome), "Nintendo positional layout flag disables")
+try? FileManager.default.removeItem(at: layoutHome)
 check(sdlWildcardGuid(vendorId: 0x057E, productId: 0x2009) == "030000007e0500000920000000000000", "Wildcard GUID")
 check(sdlGuid(vendorId: 0x045E, productId: 0x028E, version: 0x0110) == "030000005e0400008e02000010010000", "Versioned GUID")
 // a device's name goes into a comma-separated, one-per-line SDL mapping: it can't add fields or lines

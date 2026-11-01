@@ -19,7 +19,7 @@ class RunTest(unittest.TestCase):
         (package / "h2gravemind.exe").write_bytes(b"MZ")
         wine = self.home / "wine" / "Wine Staging.app" / "Contents" / "Resources" / "wine" / "bin" / "wine"
         wine.parent.mkdir(parents=True)
-        wine.write_text('#!/bin/sh\nprintf "cwd=%s exe=%s args=%s cfgfile=%s wine=%s dxvk=%s dxvkpath=%s\\n" "$(pwd)" "$1" "$*" "$SDL_GAMECONTROLLERCONFIG_FILE" "$WINEDEBUG" "$DXVK_LOG_LEVEL" "$DXVK_LOG_PATH"\n')
+        wine.write_text('#!/bin/sh\nprintf "cwd=%s exe=%s args=%s cfgfile=%s wine=%s dxvk=%s dxvkpath=%s labels=%s\\n" "$(pwd)" "$1" "$*" "$SDL_GAMECONTROLLERCONFIG_FILE" "$WINEDEBUG" "$DXVK_LOG_LEVEL" "$DXVK_LOG_PATH" "$SDL_GAMECONTROLLER_USE_BUTTON_LABELS"\n')
         wine.chmod(0o755)
 
     def tearDown(self):
@@ -101,6 +101,14 @@ class RunTest(unittest.TestCase):
         self.assertIn("cfgfile=", out)
         self.assertNotIn("cfgfile=/", out)
         self.assertFalse((self.home / "controller-mappings-active.txt").exists())
+
+    def test_nintendo_layout_flag_selects_positional_button_labels(self):
+        (self.home / "nintendo-xbox-layout").touch()
+        self.assertIn("labels=0", self.run_game())
+
+    def test_nintendo_layout_defaults_to_button_labels(self):
+        self.assertIn("labels=", self.run_game())
+        self.assertNotIn("labels=0", self.run_game())
 
     def test_missing_executable_fails_clearly(self):
         (self.home / "game" / "gravemind" / "h2gravemind.exe").unlink()

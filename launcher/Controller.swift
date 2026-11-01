@@ -143,6 +143,17 @@ final class ControllerManager: ObservableObject {
     @Published var calibrating = false
     @Published var currentStep: CalibStep = .a
     @Published var statusMessage: String?
+    @Published var isNintendoPositionalLayout = false
+
+    func toggleNintendoLayout() {
+        guard let current = currentDevice, current.isNintendo else { return }
+        let next = !isNintendoPositionalLayout
+        setNintendoXboxLayout(next, home: home)
+        isNintendoPositionalLayout = next
+        statusMessage = next
+            ? "Switched to Xbox Layout (Bottom = A / Jump). Takes effect when the game restarts."
+            : "Switched to Nintendo Layout (physical A = A). Takes effect when the game restarts."
+    }
 
     private var capturedMapping: [String: String] = [:]
     private var hidManager: IOHIDManager?
@@ -160,6 +171,7 @@ final class ControllerManager: ObservableObject {
     private var pendingTriggerButton: Int?  // a button pressed on the LT/RT step: the trigger, unless an axis moved
 
     init() {
+        isNintendoPositionalLayout = isNintendoXboxLayout(home: home)
         start()
     }
 
@@ -275,6 +287,7 @@ final class ControllerManager: ObservableObject {
     }
 
     func selectionChanged() {
+        isNintendoPositionalLayout = isNintendoXboxLayout(home: home)
         loadActiveMapping()
         resetInputState()
     }
@@ -1011,6 +1024,13 @@ struct ControllerSheet: View {
                             }
                         }
                         Spacer()
+                        if dev.isNintendo && !c.calibrating {
+                            Button(c.isNintendoPositionalLayout ? "Switch to Nintendo Layout" : "Switch to Xbox Layout") {
+                                c.toggleNintendoLayout()
+                            }
+                            .controlSize(.small)
+                            .help("Switch between Nintendo labels and Xbox positions for every Nintendo controller")
+                        }
                     }
                     .padding(8)
                     .background(RoundedRectangle(cornerRadius: 6).fill(Color(nsColor: .controlBackgroundColor).opacity(0.6)))
@@ -1106,22 +1126,22 @@ struct ControllerSheet: View {
                         .position(x: 259 * s, y: 162 * s)
 
                         // 6. Face Buttons ABXY
-                        buttonBadge(isNintendo ? "X" : "Y",
+                        buttonBadge(isNintendo ? (c.isNintendoPositionalLayout ? "Y" : "X") : "Y",
                                     active: isNintendo ? c.isActionPressed("x") : c.isActionPressed("y"),
                                     w: 24, h: 22,
                                     highlighted: c.calibrating && (isNintendo ? c.currentStep == .x : c.currentStep == .y))
                             .position(x: 329 * s, y: (160 - 26) * s)
-                        buttonBadge(isNintendo ? "Y" : "X",
+                        buttonBadge(isNintendo ? (c.isNintendoPositionalLayout ? "X" : "Y") : "X",
                                     active: isNintendo ? c.isActionPressed("y") : c.isActionPressed("x"),
                                     w: 24, h: 22,
                                     highlighted: c.calibrating && (isNintendo ? c.currentStep == .y : c.currentStep == .x))
                             .position(x: (329 - 26) * s, y: 160 * s)
-                        buttonBadge(isNintendo ? "A" : "B",
+                        buttonBadge(isNintendo ? (c.isNintendoPositionalLayout ? "B" : "A") : "B",
                                     active: isNintendo ? c.isActionPressed("a") : c.isActionPressed("b"),
                                     w: 24, h: 22,
                                     highlighted: c.calibrating && (isNintendo ? c.currentStep == .a : c.currentStep == .b))
                             .position(x: (329 + 26) * s, y: 160 * s)
-                        buttonBadge(isNintendo ? "B" : "A",
+                        buttonBadge(isNintendo ? (c.isNintendoPositionalLayout ? "A" : "B") : "A",
                                     active: isNintendo ? c.isActionPressed("b") : c.isActionPressed("a"),
                                     w: 24, h: 22,
                                     highlighted: c.calibrating && (isNintendo ? c.currentStep == .b : c.currentStep == .a))
@@ -1147,7 +1167,7 @@ struct ControllerSheet: View {
                                         .foregroundStyle(accent)
                                         .fixedSize(horizontal: false, vertical: true)
                                     Text(isNintendo
-                                         ? "Press buttons as labeled on your controller. You can switch to Xbox Layout (Bottom = A) at any time."
+                                         ? "Press buttons as labeled on your controller. Choose the button layout above before calibrating."
                                          : "Follow the prompts. Press each button on the selected controller, or click Skip.")
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
