@@ -40,9 +40,9 @@ VERSIONS = GAME / "versions"          # older Gravemind builds chosen for compat
 CHOSEN = GAME / "chosen-version"
 APP_CHOSEN = BASE / "chosen-application-version"
 RELEASE_API = os.environ.get("GRAVEMIND_RELEASE_API", "https://api.github.com/repos/BriRoz1/"
-                             "h2gravemind-beta/releases/latest")
+                             "h2gravemind-releases/releases/latest")
 RELEASES_API = os.environ.get("GRAVEMIND_RELEASES_API", "https://api.github.com/repos/BriRoz1/"
-                              "h2gravemind-beta/releases?per_page=100")
+                              "h2gravemind-releases/releases?per_page=100")
 APP_RELEASES_API = os.environ.get("RECLAIMER_RELEASES_API", f"https://api.github.com/repos/{REPO}/releases?per_page=100")
 APP_TAG_RAW = os.environ.get("RECLAIMER_TAG_RAW", f"https://raw.githubusercontent.com/{REPO}")
 MIN_PINNABLE_APP_VERSION = "0.8.8"
@@ -217,14 +217,14 @@ def release_asset(release):
     """Return the version and checksum-verified ZIP asset from a Gravemind release."""
     version = release_version(release)
     for asset in release.get("assets", []):
-        if asset.get("name") != "h2gravemind_beta.zip":
+        if asset.get("name") != "h2gravemind.zip":
             continue
         digest = str(asset.get("digest", ""))
         match = re.fullmatch(r"sha256:([0-9a-fA-F]{64})", digest)
         url = asset.get("browser_download_url")
         if match and url:
             return version, url, match.group(1).lower()
-    raise RuntimeError(f"Project Gravemind {version} has no verifiable h2gravemind_beta.zip")
+    raise RuntimeError(f"Project Gravemind {version} has no verifiable h2gravemind.zip")
 
 
 def latest_release():
@@ -262,7 +262,7 @@ def install_release(version, url, expected, target):
     target.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(dir=target.parent) as tmp:
         work = Path(tmp)
-        archive = work / "h2gravemind_beta.zip"
+        archive = work / "h2gravemind.zip"
         download_verified(url, archive, expected)
         extracted = work / "package"
         extracted.mkdir()

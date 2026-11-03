@@ -15,13 +15,13 @@
 	<a href="https://discord.gg/7nAmnwnQqb"><img src="https://img.shields.io/badge/Discord-join-5865F2?logo=discord&logoColor=white" alt="Discord"></a>
 </p>
 
-An experimental Apple Silicon launcher for [Project Gravemind](https://github.com/BriRoz1/h2gravemind-beta), the Halo 2 project for Halo: The Master Chief Collection. It installs the Windows release under Wine and downloads the required MCC files from the player's own Steam account.
+An experimental Apple Silicon launcher for [Project Gravemind](https://github.com/BriRoz1/h2gravemind-releases/releases), the Halo 2 project for Halo: The Master Chief Collection. It installs the Windows release under Wine and downloads the required MCC files from the player's own Steam account.
 
 Project Gravemind is distributed as a Windows-only executable, and its source is not public. This Mac port has not yet been verified in an actual Gravemind multiplayer or campaign session. Graphics, audio, controllers, networking, Steam integration, and updates may need further work on Wine.
 
 ## Credits
 
-This Mac port builds on [Project Reclaimer Mac Port](https://github.com/mattromano/project-reclaimer-mac-port) by Matt Romano. It downloads Project Gravemind releases from [BriRoz1/h2gravemind-beta](https://github.com/BriRoz1/h2gravemind-beta). Halo: The Master Chief Collection and Halo 2 are Microsoft properties; this project is independent and is not affiliated with Microsoft, Valve, or the Project Gravemind developers.
+This Mac port builds on [Project Reclaimer Mac Port](https://github.com/mattromano/project-reclaimer-mac-port) by Matt Romano. It downloads Project Gravemind releases from [BriRoz1/h2gravemind-releases](https://github.com/BriRoz1/h2gravemind-releases/releases). Halo: The Master Chief Collection and Halo 2 are Microsoft properties; this project is independent and is not affiliated with Microsoft, Valve, or the Project Gravemind developers.
 
 ## Requirements
 
@@ -34,7 +34,7 @@ The port does not include MCC or Halo game files. Halo 2 campaign is depot `9767
 
 ## Install
 
-This repository does not currently publish a DMG. To install Project Gravemind, open Terminal and run:
+Download the latest DMG from [Releases](https://github.com/drewdrew21b/project-gravemind-mac-port/releases/latest), or install Project Gravemind from Terminal:
 
 ```bash
 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/drewdrew21b/project-gravemind-mac-port/main/install.sh)"
