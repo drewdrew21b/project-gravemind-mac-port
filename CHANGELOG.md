@@ -2,8 +2,9 @@
 
 Changes since the port moved from Project Reclaimer (Halo 3) to Project Gravemind (Halo 2).
 
-## 0.8.14
+## 0.8.15
 - Update Project Gravemind downloads to the official releases feed and archive format.
+- Preserve the Gravemind profile, Workshop content, and game logs when rebuilding Wine.
 
 ## 0.8.13
 - Keep the main window within the screen when help expands; scroll the page to reach lower content.

@@ -55,7 +55,7 @@ To build the launcher app and a local disk image from source, run `scripts/make_
 
 Opening the Mac launcher checks for a newer Mac-port version and the latest Project Gravemind release. The game package is downloaded from GitHub Releases and checked against the release's published SHA-256 digest before installation.
 
-Project Gravemind stores its settings, campaign saves, and mods in its own `Documents\My Games\Project Gravemind` folder inside the Wine prefix. The game can be started from the launcher or directly with `scripts/run.sh`.
+Project Gravemind stores its settings, campaign saves, and mods in `Documents\My Games\Project Gravemind`; the Mac port keeps that profile at `~/Games/ProjectGravemind/user-data/Project Gravemind` and links it into Wine. Workshop downloads are kept at `~/Games/ProjectGravemind/games/workshop`, and Gravemind's own logs at `~/Games/ProjectGravemind/logs/appdata-gravemind`. These are preserved when the Wine prefix is rebuilt. The game can be started from the launcher or directly with `scripts/run.sh`.
 
 ## Compatibility notes
 
@@ -70,7 +70,7 @@ Project Gravemind stores its settings, campaign saves, and mods in its own `Docu
 - The SwiftUI launcher checks for Mac-port updates and prepares the Wine environment before starting the game.
 - Wine Staging runs the Windows `h2gravemind.exe` under Rosetta. DXVK translates Direct3D 11 to Vulkan, and MoltenVK translates Vulkan to Apple's Metal graphics API.
 - The installer uses Steam QR sign-in to download MCC shared files, Halo 2 campaign files, and both Halo 2 multiplayer depots from the player's own Steam account. The game files are not bundled with this port.
-- Tools can rebuild the Wine prefix without redownloading the separate Halo 2/MCC folder. Rebuilding resets Wine settings, saves, and downloaded Workshop content.
+- Tools can rebuild the Wine prefix without redownloading Halo 2/MCC files or losing the Gravemind profile, Workshop downloads, and game logs. Rebuilding resets Wine settings.
 - The updater downloads the latest Project Gravemind release ZIP and verifies its published SHA-256 digest before installing it.
 
 ## Debug a crash

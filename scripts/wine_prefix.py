@@ -12,6 +12,9 @@ from pathlib import Path
 MCC_REL = Path("drive_c") / "Program Files (x86)" / "Steam" / "steamapps" / "common" / "Halo The Master Chief Collection"
 GAME_FILES_REL = Path("game") / "Halo The Master Chief Collection"
 PREVIOUS_GAME_FILES_REL = Path("games") / "Halo The Master Chief Collection"
+PROFILE_REL = Path("user-data") / "Project Gravemind"
+WORKSHOP_REL = Path("games") / "workshop"
+GRAVEMIND_LOGS_REL = Path("logs") / "appdata-gravemind"
 DXVK_ARCHIVE = "dxvk-macOS-async-v1.10.3-20230507-repack.tar.gz"
 DXVK_URL = "https://github.com/Gcenx/DXVK-macOS/releases/download/v1.10.3-20230507-repack/" + DXVK_ARCHIVE
 DXVK_SHA256 = "acd1520ad105d8ef124a09c8e11a259a5dc8bdc565ad18e0e52693f9807b2477"
@@ -83,6 +86,73 @@ def ensure_game_files_link(base):
     link.symlink_to(game_files, target_is_directory=True)
     _remove_empty_previous_parent(base)
     return game_files
+
+
+def _ensure_directory_links(sources, destination, label):
+    destination = Path(destination)
+    sources = [Path(source) for source in sources]
+    destination_resolved = destination.resolve(strict=False)
+    if destination.is_symlink():
+        raise RuntimeError(f"The external {label} path is a symlink; refusing to change it: {destination}")
+
+    nonempty = []
+    for source in sources:
+        if source.is_symlink():
+            if source.resolve(strict=False) != destination_resolved:
+                raise RuntimeError(f"The {label} symlink points somewhere unexpected: {source}")
+        elif source.exists():
+            if not source.is_dir():
+                raise RuntimeError(f"The {label} path isn't a directory: {source}")
+            if _directory_has_data(source):
+                nonempty.append(source)
+
+    if len(nonempty) > 1:
+        raise RuntimeError(f"Multiple {label} folders contain files; refusing to merge them.")
+    if destination.exists() and not destination.is_dir():
+        raise RuntimeError(f"The external {label} path isn't a directory: {destination}")
+    destination_has_files = destination.is_dir() and _directory_has_data(destination)
+    if destination_has_files and nonempty:
+        raise RuntimeError(f"Both the old and new {label} folders contain files; refusing to merge them.")
+
+    if nonempty:
+        source = nonempty[0]
+        if destination.exists():
+            shutil.rmtree(destination)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(source), str(destination))
+    else:
+        destination.mkdir(parents=True, exist_ok=True)
+
+    for source in sources:
+        if source.is_symlink():
+            continue
+        if source.exists():
+            source.rmdir()
+        source.parent.mkdir(parents=True, exist_ok=True)
+        source.symlink_to(destination, target_is_directory=True)
+
+
+def _directory_has_data(path):
+    return any(item.is_file() or item.is_symlink() for item in path.rglob("*"))
+
+
+def ensure_user_data_links(base):
+    """Keep the game profile, Workshop store, and Gravemind logs outside rebuildable Wine state."""
+    base = Path(base).resolve()
+    prefix = base / "prefix-wine"
+    users = prefix / "drive_c" / "users"
+    user_dirs = []
+    if users.is_dir():
+        user_dirs = [user for user in users.iterdir()
+                     if user.is_dir() and not user.is_symlink()
+                     and user.name.lower() not in {"public", "default", "default user", "all users"}]
+
+    profile_links = [user / "Documents" / "My Games" / "Project Gravemind" for user in user_dirs]
+    workshop_link = (prefix / "drive_c" / "Program Files (x86)" / "Steam" / "steamapps" / "workshop")
+    logs_links = [user / "AppData" / "Local" / "Project Gravemind" / "logs" for user in user_dirs]
+    _ensure_directory_links(profile_links, base / PROFILE_REL, "Gravemind profile")
+    _ensure_directory_links([workshop_link], base / WORKSHOP_REL, "Workshop")
+    _ensure_directory_links(logs_links, base / GRAVEMIND_LOGS_REL, "Gravemind logs")
 
 
 def _wine_paths(base):
@@ -174,6 +244,7 @@ def prepare_prefix(base, rebuild=False, install_dxvk=False, runner=subprocess.ru
     if prefix.is_symlink():
         raise RuntimeError(f"The Wine prefix path is a symlink; refusing to replace it: {prefix}")
     game_files = ensure_game_files_link(base)
+    ensure_user_data_links(base)
 
     dxvk = _dxvk_files(base) if rebuild and install_dxvk else None
     if rebuild:
@@ -210,6 +281,7 @@ def prepare_prefix(base, rebuild=False, install_dxvk=False, runner=subprocess.ru
                 documents.unlink()
                 documents.mkdir(parents=True, exist_ok=True)
 
+    ensure_user_data_links(base)
     ensure_game_files_link(base)
     if install_dxvk:
         _install_dxvk(base, prefix, dxvk)

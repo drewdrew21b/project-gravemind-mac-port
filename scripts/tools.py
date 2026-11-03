@@ -33,7 +33,7 @@ BASE = Path(os.environ.get("RECLAIMER_HOME", HOME / "Games" / "ProjectGravemind"
 GAME = BASE / "game"
 LOGS = BASE / "logs"
 STEAMAPPS = BASE / "prefix-wine" / "drive_c" / "Program Files (x86)" / "Steam" / "steamapps"
-WORKSHOP = STEAMAPPS / "workshop" / "content" / "976730"
+WORKSHOP = BASE / "games" / "workshop" / "content" / "976730"
 CANONICAL_MCC_DIR = BASE / "game" / "Halo The Master Chief Collection"
 PREVIOUS_MCC_DIR = BASE / "games" / "Halo The Master Chief Collection"
 LEGACY_MCC_DIR = STEAMAPPS / "common" / "Halo The Master Chief Collection"
@@ -428,9 +428,8 @@ def report(debug=False):
         z.writestr("summary.txt", scrub("\n".join(summary) + "\n"))
         for log in sorted(LOGS.glob("*.log")):
             z.writestr(f"logs/{log.name}", scrub(log.read_text(errors="replace")[-tail:]))
-        if debug:  # Gravemind's own logs live in the Wine user's profile
-            own = BASE / "prefix-wine" / "drive_c" / "users"
-            for log in sorted(own.glob("*/AppData/Local/Project Gravemind/logs/*")):
+        if debug:  # Gravemind's own logs are kept outside the rebuildable Wine prefix
+            for log in sorted((BASE / "logs" / "appdata-gravemind").glob("*")):
                 if log.is_file():
                     z.writestr(f"gravemind-logs/{log.name}", scrub(log.read_text(errors="replace")[-tail:]))
     return f"ok {path}"

@@ -17,14 +17,14 @@ from unittest import mock
 
 REPO = Path(__file__).resolve().parent.parent
 TOOLS = REPO / "scripts" / "tools.py"
-WORKSHOP = Path("prefix-wine/drive_c/Program Files (x86)/Steam/steamapps/workshop")
+WORKSHOP = Path("games/workshop")
 
 
 class ToolsTest(unittest.TestCase):
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp())
         self.home = self.tmp / "Games" / "ProjectGravemind"
-        for d in ("game", "logs", "tools", WORKSHOP / "content" / "976730"):
+        for d in ("game", "logs", "tools", "prefix-wine", WORKSHOP / "content" / "976730"):
             (self.home / d).mkdir(parents=True)
         # the helper scripts sit next to tools.py in an install's game folder
         for f in ("workshop_helper.py", "presets.py", "fit.py", "game_process.py", "wine_prefix.py"):
@@ -312,7 +312,7 @@ class ToolsTest(unittest.TestCase):
     def test_debug_report_is_named_for_its_time_and_includes_gravemind_logs(self):
         (self.home / "steam-account").write_text("SecretName\n")
         (self.home / "logs" / "client-wine-debug.log").write_text("trace for SecretName\n")
-        own = self.home / "prefix-wine" / "drive_c" / "users" / "u" / "AppData" / "Local" / "Project Gravemind" / "logs"
+        own = self.home / "logs" / "appdata-gravemind"
         own.mkdir(parents=True)
         (own / "gravemind.log").write_text("game log\n")
         rc, out = self.run_tool("debug-report")
@@ -384,7 +384,7 @@ class ToolsTest(unittest.TestCase):
         self.assertTrue(legacy.is_symlink())
         self.assertEqual(legacy.resolve(), separate.resolve())
 
-    def test_released_games_folder_migrates_and_empty_parent_is_removed(self):
+    def test_released_games_folder_migrates_and_workshop_parent_is_preserved(self):
         tools = self.load()
         previous = self.home / "games/Halo The Master Chief Collection"
         previous.mkdir(parents=True)
@@ -397,7 +397,7 @@ class ToolsTest(unittest.TestCase):
 
         self.assertEqual((separate / "halo2.map").read_bytes(), b"map")
         self.assertFalse(previous.exists())
-        self.assertFalse((self.home / "games").exists())
+        self.assertTrue((self.home / "games" / "workshop").is_dir())
         self.assertEqual(link.resolve(), separate.resolve())
 
     def test_tools_use_released_games_folder_until_migration(self):
@@ -425,13 +425,24 @@ class ToolsTest(unittest.TestCase):
 
         self.assertEqual((self.home / "games/keep.txt").read_text(), "keep")
 
-    def test_rebuild_prefix_preserves_separate_game_files(self):
+    def test_rebuild_prefix_preserves_separate_game_files_and_user_data(self):
         tools = self.load()
         legacy = self.home / "prefix-wine/drive_c/Program Files (x86)/Steam/steamapps/common/Halo The Master Chief Collection"
         legacy.mkdir(parents=True)
         (legacy / "ascension.map").write_bytes(b"halo2 files")
         prefix = self.home / "prefix-wine"
         (prefix / "system.reg").write_text("old prefix")
+        user = prefix / "drive_c/users/player"
+        old_profile = user / "Documents/My Games/Project Gravemind"
+        old_profile.mkdir(parents=True)
+        (old_profile / "save.dat").write_bytes(b"campaign save")
+        old_workshop = prefix / "drive_c/Program Files (x86)/Steam/steamapps/workshop"
+        (old_workshop / "content/976730/123").mkdir(parents=True)
+        (old_workshop / "content/976730/123/mod.dat").write_bytes(b"workshop item")
+        (old_workshop / "appworkshop_976730.acf").write_text("manifest")
+        old_logs = user / "AppData/Local/Project Gravemind/logs"
+        old_logs.mkdir(parents=True)
+        (old_logs / "game.log").write_text("game log")
         wine_bin = self.home / "wine/Wine Staging.app/Contents/Resources/wine/bin"
         wine_bin.mkdir(parents=True)
         (wine_bin / "wine").touch()
@@ -444,6 +455,7 @@ class ToolsTest(unittest.TestCase):
         def fake_runner(command, **kwargs):
             if "wineboot" in command:
                 (prefix / "system.reg").write_text("new prefix")
+                (prefix / "drive_c/users/player/Documents").mkdir(parents=True)
             elif "reg" in command:
                 with (prefix / "system.reg").open("a") as registry:
                     registry.write('"DisableHidraw"=dword:00000001\n')
@@ -457,11 +469,41 @@ class ToolsTest(unittest.TestCase):
         self.assertEqual((separate / "ascension.map").read_bytes(), b"halo2 files")
         self.assertTrue(link.is_symlink())
         self.assertEqual(link.resolve(), separate.resolve())
+        external_profile = self.home / "user-data/Project Gravemind"
+        profile_link = prefix / "drive_c/users/player/Documents/My Games/Project Gravemind"
+        self.assertEqual((external_profile / "save.dat").read_bytes(), b"campaign save")
+        self.assertTrue(profile_link.is_symlink())
+        self.assertEqual(profile_link.resolve(), external_profile.resolve())
+        external_workshop = self.home / "games/workshop"
+        workshop_link = prefix / "drive_c/Program Files (x86)/Steam/steamapps/workshop"
+        self.assertEqual((external_workshop / "content/976730/123/mod.dat").read_bytes(), b"workshop item")
+        self.assertEqual((external_workshop / "appworkshop_976730.acf").read_text(), "manifest")
+        self.assertTrue(workshop_link.is_symlink())
+        self.assertEqual(workshop_link.resolve(), external_workshop.resolve())
+        external_logs = self.home / "logs/appdata-gravemind"
+        logs_link = prefix / "drive_c/users/player/AppData/Local/Project Gravemind/logs"
+        self.assertEqual((external_logs / "game.log").read_text(), "game log")
+        self.assertTrue(logs_link.is_symlink())
+        self.assertEqual(logs_link.resolve(), external_logs.resolve())
         registry = (prefix / "system.reg").read_text()
         self.assertIn("new prefix", registry)
         self.assertIn('"DisableHidraw"=dword:00000001', registry)
         self.assertEqual((prefix / "drive_c/windows/system32/d3d10core.dll").read_bytes(), b"core")
         self.assertEqual((prefix / "drive_c/windows/system32/d3d11.dll").stat().st_size, 1_000_001)
+
+    def test_external_data_migration_refuses_conflicts_without_overwriting(self):
+        tools = self.load()
+        old_workshop = self.home / "prefix-wine/drive_c/Program Files (x86)/Steam/steamapps/workshop"
+        (old_workshop / "content/976730").mkdir(parents=True)
+        (old_workshop / "content/976730/old.dat").write_text("old")
+        external_workshop = self.home / "games/workshop"
+        (external_workshop / "content/976730/new.dat").write_text("new")
+
+        with self.assertRaisesRegex(RuntimeError, "Both the old and new Workshop folders"):
+            tools.wine_prefix.ensure_user_data_links(self.home)
+
+        self.assertEqual((old_workshop / "content/976730/old.dat").read_text(), "old")
+        self.assertEqual((external_workshop / "content/976730/new.dat").read_text(), "new")
 
     def test_rebuild_prefix_refuses_while_game_is_running(self):
         tools = self.load()

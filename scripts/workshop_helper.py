@@ -5,7 +5,7 @@ Watches Reclaimer's client log for mods it can't get from Steam Workshop (there 
 "Mod <title> not downloaded: ... Workshop" (Workshop-only mods), and "Workshop for <title> unavailable ... using the
 server" (the game falls back to downloading from the game servers, which cap mod sharing at ~2.5 MB/s each).
 Resolves the Workshop item ID, downloads it with DepotDownloader (saved Steam login, Steam's CDN) into Steam's
-Workshop folder inside the Wine prefix, records it in Steam's Workshop manifest (appworkshop_976730.acf, which the
+Workshop folder, records it in Steam's Workshop manifest (appworkshop_976730.acf, which the
 game checks and only the Steam client normally writes), and posts a macOS notification. The player then presses
 Try Again, or leaves and rejoins to stop the slower server download. Mods updated on Workshop are downloaded again.
 Each mod's progress goes to logs/mods/<id>.json, which the launcher window shows.
@@ -57,8 +57,7 @@ def save_account(name):
         f.write(name + "\n")
 STATUS_DIR = BASE / "logs" / "mods"
 DEPOT = BASE / "tools" / "DepotDownloader"
-WORKSHOP = (BASE / "prefix-wine" / "drive_c" / "Program Files (x86)" / "Steam" / "steamapps" / "workshop"
-            / "content" / "976730")
+WORKSHOP = BASE / "games" / "workshop" / "content" / "976730"
 # Reclaimer's profile lives in the prefix (the installer unlinks Documents from ~/Documents)
 PROFILES = [d / "Documents" / "My Games" / "Project Gravemind"
             for d in (BASE / "prefix-wine" / "drive_c" / "users").glob("*")]
