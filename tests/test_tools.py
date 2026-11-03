@@ -17,7 +17,7 @@ from unittest import mock
 
 REPO = Path(__file__).resolve().parent.parent
 TOOLS = REPO / "scripts" / "tools.py"
-WORKSHOP = Path("games/workshop")
+WORKSHOP = Path("game/workshop")
 
 
 class ToolsTest(unittest.TestCase):
@@ -397,7 +397,7 @@ class ToolsTest(unittest.TestCase):
 
         self.assertEqual((separate / "halo2.map").read_bytes(), b"map")
         self.assertFalse(previous.exists())
-        self.assertTrue((self.home / "games" / "workshop").is_dir())
+        self.assertTrue((self.home / "game" / "workshop").is_dir())
         self.assertEqual(link.resolve(), separate.resolve())
 
     def test_tools_use_released_games_folder_until_migration(self):
@@ -474,7 +474,7 @@ class ToolsTest(unittest.TestCase):
         self.assertEqual((external_profile / "save.dat").read_bytes(), b"campaign save")
         self.assertTrue(profile_link.is_symlink())
         self.assertEqual(profile_link.resolve(), external_profile.resolve())
-        external_workshop = self.home / "games/workshop"
+        external_workshop = self.home / "game/workshop"
         workshop_link = prefix / "drive_c/Program Files (x86)/Steam/steamapps/workshop"
         self.assertEqual((external_workshop / "content/976730/123/mod.dat").read_bytes(), b"workshop item")
         self.assertEqual((external_workshop / "appworkshop_976730.acf").read_text(), "manifest")
@@ -496,7 +496,7 @@ class ToolsTest(unittest.TestCase):
         old_workshop = self.home / "prefix-wine/drive_c/Program Files (x86)/Steam/steamapps/workshop"
         (old_workshop / "content/976730").mkdir(parents=True)
         (old_workshop / "content/976730/old.dat").write_text("old")
-        external_workshop = self.home / "games/workshop"
+        external_workshop = self.home / "game/workshop"
         (external_workshop / "content/976730/new.dat").write_text("new")
 
         with self.assertRaisesRegex(RuntimeError, "Both the old and new Workshop folders"):
@@ -504,6 +504,25 @@ class ToolsTest(unittest.TestCase):
 
         self.assertEqual((old_workshop / "content/976730/old.dat").read_text(), "old")
         self.assertEqual((external_workshop / "content/976730/new.dat").read_text(), "new")
+
+    def test_previous_external_workshop_store_moves_to_game_folder(self):
+        tools = self.load()
+        previous = self.home / "games/workshop"
+        (previous / "content/976730/123").mkdir(parents=True)
+        (previous / "content/976730/123/mod.dat").write_bytes(b"existing mod")
+        (previous / "appworkshop_976730.acf").write_text("manifest")
+        link = self.home / "prefix-wine/drive_c/Program Files (x86)/Steam/steamapps/workshop"
+        link.parent.mkdir(parents=True, exist_ok=True)
+        link.symlink_to(previous, target_is_directory=True)
+
+        tools.wine_prefix.ensure_user_data_links(self.home)
+
+        destination = self.home / "game/workshop"
+        self.assertEqual((destination / "content/976730/123/mod.dat").read_bytes(), b"existing mod")
+        self.assertEqual((destination / "appworkshop_976730.acf").read_text(), "manifest")
+        self.assertFalse(previous.exists())
+        self.assertTrue(link.is_symlink())
+        self.assertEqual(link.resolve(), destination.resolve())
 
     def test_rebuild_prefix_refuses_while_game_is_running(self):
         tools = self.load()

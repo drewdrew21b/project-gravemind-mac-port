@@ -2,6 +2,9 @@
 
 Changes since the port moved from Project Reclaimer (Halo 3) to Project Gravemind (Halo 2).
 
+## 0.8.16
+- Store Workshop downloads under `game/workshop` and migrate existing data from `games/workshop`.
+
 ## 0.8.15
 - Update Project Gravemind downloads to the official releases feed and archive format.
 - Preserve the Gravemind profile, Workshop content, and game logs when rebuilding Wine.

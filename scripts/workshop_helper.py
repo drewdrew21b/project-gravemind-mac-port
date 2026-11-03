@@ -57,7 +57,7 @@ def save_account(name):
         f.write(name + "\n")
 STATUS_DIR = BASE / "logs" / "mods"
 DEPOT = BASE / "tools" / "DepotDownloader"
-WORKSHOP = BASE / "games" / "workshop" / "content" / "976730"
+WORKSHOP = BASE / "game" / "workshop" / "content" / "976730"
 # Reclaimer's profile lives in the prefix (the installer unlinks Documents from ~/Documents)
 PROFILES = [d / "Documents" / "My Games" / "Project Gravemind"
             for d in (BASE / "prefix-wine" / "drive_c" / "users").glob("*")]

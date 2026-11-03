@@ -13,7 +13,8 @@ MCC_REL = Path("drive_c") / "Program Files (x86)" / "Steam" / "steamapps" / "com
 GAME_FILES_REL = Path("game") / "Halo The Master Chief Collection"
 PREVIOUS_GAME_FILES_REL = Path("games") / "Halo The Master Chief Collection"
 PROFILE_REL = Path("user-data") / "Project Gravemind"
-WORKSHOP_REL = Path("games") / "workshop"
+WORKSHOP_REL = Path("game") / "workshop"
+PREVIOUS_WORKSHOP_REL = Path("games") / "workshop"
 GRAVEMIND_LOGS_REL = Path("logs") / "appdata-gravemind"
 DXVK_ARCHIVE = "dxvk-macOS-async-v1.10.3-20230507-repack.tar.gz"
 DXVK_URL = "https://github.com/Gcenx/DXVK-macOS/releases/download/v1.10.3-20230507-repack/" + DXVK_ARCHIVE
@@ -151,8 +152,39 @@ def ensure_user_data_links(base):
     workshop_link = (prefix / "drive_c" / "Program Files (x86)" / "Steam" / "steamapps" / "workshop")
     logs_links = [user / "AppData" / "Local" / "Project Gravemind" / "logs" for user in user_dirs]
     _ensure_directory_links(profile_links, base / PROFILE_REL, "Gravemind profile")
+    _migrate_previous_workshop(base, workshop_link)
     _ensure_directory_links([workshop_link], base / WORKSHOP_REL, "Workshop")
     _ensure_directory_links(logs_links, base / GRAVEMIND_LOGS_REL, "Gravemind logs")
+
+
+def _migrate_previous_workshop(base, prefix_link):
+    previous = Path(base) / PREVIOUS_WORKSHOP_REL
+    destination = Path(base) / WORKSHOP_REL
+    if previous.is_symlink():
+        raise RuntimeError(f"The previous Workshop path is a symlink; refusing to change it: {previous}")
+    if not previous.exists():
+        return
+    if not previous.is_dir():
+        raise RuntimeError(f"The previous Workshop path isn't a directory: {previous}")
+
+    prefix_targets_previous = prefix_link.is_symlink() and prefix_link.resolve(strict=False) == previous.resolve()
+    if prefix_link.is_symlink() and not prefix_targets_previous and prefix_link.resolve(strict=False) != destination.resolve(strict=False):
+        raise RuntimeError(f"The Workshop symlink points somewhere unexpected: {prefix_link}")
+
+    previous_has_data = _directory_has_data(previous)
+    destination_has_data = destination.is_dir() and _directory_has_data(destination)
+    if previous_has_data and destination_has_data:
+        raise RuntimeError("Both the previous and new Workshop folders contain files; refusing to merge them.")
+
+    if prefix_targets_previous:
+        prefix_link.unlink()
+    if previous_has_data:
+        if destination.exists():
+            shutil.rmtree(destination)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(previous), str(destination))
+    else:
+        shutil.rmtree(previous)
 
 
 def _wine_paths(base):

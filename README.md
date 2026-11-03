@@ -55,7 +55,7 @@ To build the launcher app and a local disk image from source, run `scripts/make_
 
 Opening the Mac launcher checks for a newer Mac-port version and the latest Project Gravemind release. The game package is downloaded from GitHub Releases and checked against the release's published SHA-256 digest before installation.
 
-Project Gravemind stores its settings, campaign saves, and mods in `Documents\My Games\Project Gravemind`; the Mac port keeps that profile at `~/Games/ProjectGravemind/user-data/Project Gravemind` and links it into Wine. Workshop downloads are kept at `~/Games/ProjectGravemind/games/workshop`, and Gravemind's own logs at `~/Games/ProjectGravemind/logs/appdata-gravemind`. These are preserved when the Wine prefix is rebuilt. The game can be started from the launcher or directly with `scripts/run.sh`.
+Project Gravemind stores its settings, campaign saves, and mods in `Documents\My Games\Project Gravemind`; the Mac port keeps that profile at `~/Games/ProjectGravemind/user-data/Project Gravemind` and links it into Wine. Workshop downloads are kept at `~/Games/ProjectGravemind/game/workshop`, and Gravemind's own logs at `~/Games/ProjectGravemind/logs/appdata-gravemind`. These are preserved when the Wine prefix is rebuilt. The game can be started from the launcher or directly with `scripts/run.sh`.
 
 ## Compatibility notes
 
